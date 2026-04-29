@@ -11,7 +11,7 @@ from shared.prompts import CRITIC_INSTRUCTION, DRAFTER_INSTRUCTION
 
 drafter = Agent(
     name="drafter",
-    model="gemini-3.1-pro",
+    model="gemini-3.1-pro-preview",
     instruction=DRAFTER_INSTRUCTION,
     output_key="draft",
 )
@@ -19,7 +19,7 @@ drafter = Agent(
 
 critic_llm = Agent(
     name="critic_llm",
-    model="gemini-3.1-flash",
+    model="gemini-3.1-flash-lite-preview",
     instruction=CRITIC_INSTRUCTION,
-    output_key="_critic_raw",
+    output_key="critic_raw",
 )

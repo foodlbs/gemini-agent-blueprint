@@ -12,7 +12,7 @@ from tools.github_ops import (
 
 repo_builder = Agent(
     name="repo_builder",
-    model="gemini-3.1-flash",
+    model="gemini-3.1-flash-lite-preview",
     instruction=REPO_BUILDER_INSTRUCTION,
     tools=[github_create_repo, github_commit_files, github_set_topics],
     output_key="starter_repo",

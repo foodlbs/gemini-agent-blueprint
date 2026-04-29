@@ -19,8 +19,8 @@ _VIDEO_MARKER_RE = re.compile(r"<!--VID:[^>]+?-->", re.IGNORECASE)
 
 
 def critic_split(node_input, ctx: Context) -> Event:
-    """Parse `_critic_raw` JSON; mutate draft.critic_*; bump writer_iterations."""
-    raw = ctx.state.get("_critic_raw") or ""
+    """Parse `critic_raw` JSON; mutate draft.critic_*; bump writer_iterations."""
+    raw = ctx.state.get("critic_raw") or ""
     cleaned = _FENCE_RE.sub("", raw).strip()
     if not cleaned.startswith("{"):
         match = re.search(r"\{.*\}", cleaned, re.DOTALL)

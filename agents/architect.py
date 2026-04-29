@@ -8,7 +8,7 @@ from shared.prompts import ARCHITECT_INSTRUCTION
 
 architect_llm = Agent(
     name="architect_llm",
-    model="gemini-3.1-pro",
+    model="gemini-3.1-pro-preview",
     instruction=ARCHITECT_INSTRUCTION,
-    output_key="_architect_raw",
+    output_key="architect_raw",
 )

@@ -163,6 +163,10 @@ class PipelineState(BaseModel):
     """Set by the trigger entry node from the Cloud Scheduler payload."""
 
     # --- Scout ---------------------------------------------------------------
+    scout_raw: Optional[str] = None
+    """Raw text output from the Scout LLM (markdown-fenced JSON). The
+    `scout_split` function node parses this into the typed `candidates`
+    list. NOT for direct downstream consumption."""
     candidates: list[Candidate] = Field(default_factory=list)
     """All candidate releases collected by Scout this cycle."""
 
@@ -184,6 +188,8 @@ class PipelineState(BaseModel):
     """Merged dossier produced by gather_research from the three above."""
 
     # --- Architect -----------------------------------------------------------
+    architect_raw: Optional[str] = None
+    """Raw JSON blob from architect_llm. Parsed by `architect_split`."""
     outline: Optional[Outline] = None
     image_briefs: list[ImageBrief] = Field(default_factory=list)
     video_brief: Optional[VideoBrief] = None
@@ -193,6 +199,8 @@ class PipelineState(BaseModel):
     # --- Writer loop ---------------------------------------------------------
     draft: Optional[Draft] = None
     """Current draft being iterated. Drafter writes; Critic annotates."""
+    critic_raw: Optional[str] = None
+    """Raw JSON verdict from critic_llm. Parsed by `critic_split`."""
     writer_iterations: int = 0
     """Hard cap counter — route_critic_verdict forces ACCEPT once this hits 3."""
 

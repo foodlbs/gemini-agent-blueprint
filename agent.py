@@ -51,6 +51,7 @@ from nodes.routing import (
     route_needs_repo,
     route_topic_verdict,
 )
+from nodes.scout_split import scout_split
 from nodes.video_asset import video_asset_or_skip
 
 from shared.models import PipelineState
@@ -60,8 +61,11 @@ root_agent = Workflow(
     name="ai_release_pipeline_v2",
     state_schema=PipelineState,
     edges=[
-        # --- 1. Scout → Triage → route on chosen_release -----------------
-        ("START", scout, triage, route_after_triage, {
+        # --- 1. Scout → scout_split → Triage → route on chosen_release ---
+        # scout_split parses Scout's scout_raw (markdown-fenced JSON) into
+        # the typed `candidates` list. Same pattern as architect_split +
+        # critic_split — strict on parse, defensive on truncation.
+        ("START", scout, scout_split, triage, route_after_triage, {
             "SKIP":     record_triage_skip,
             "CONTINUE": topic_gate_request,
         }),

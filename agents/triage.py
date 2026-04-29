@@ -14,7 +14,7 @@ from tools.state_helpers import write_state_json
 
 triage = Agent(
     name="triage",
-    model="gemini-3.1-flash",
+    model="gemini-3.1-flash-lite-preview",
     instruction=TRIAGE_INSTRUCTION,
     tools=[memory_bank_search, write_state_json],
 )

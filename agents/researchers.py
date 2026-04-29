@@ -21,7 +21,7 @@ except ImportError:
 
 docs_researcher = Agent(
     name="docs_researcher",
-    model="gemini-3.1-flash",
+    model="gemini-3.1-flash-lite-preview",
     instruction=DOCS_RESEARCHER_INSTRUCTION,
     tools=[web_fetch, *_SEARCH_TOOL],
     output_key="docs_research",
@@ -39,7 +39,7 @@ github_researcher = Agent(
 
 context_researcher = Agent(
     name="context_researcher",
-    model="gemini-3.1-flash",
+    model="gemini-3.1-flash-lite-preview",
     instruction=CONTEXT_RESEARCHER_INSTRUCTION,
     tools=[web_fetch, *_SEARCH_TOOL],
     output_key="context_research",

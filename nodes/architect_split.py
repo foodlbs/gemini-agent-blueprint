@@ -19,7 +19,7 @@ _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
 def architect_split(node_input, ctx: Context) -> Event:
     """Parse architect_llm's JSON blob → outline + image_briefs + ... 5 keys."""
-    raw = ctx.state.get("_architect_raw") or ""
+    raw = ctx.state.get("architect_raw") or ""
     cleaned = _FENCE_RE.sub("", raw).strip()
     if not cleaned.startswith("{"):
         match = re.search(r"\{.*\}", cleaned, re.DOTALL)

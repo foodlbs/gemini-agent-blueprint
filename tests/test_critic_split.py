@@ -36,7 +36,7 @@ def _briefs(positions: list[str]) -> list[ImageBrief]:
 def test_parses_clean_accept_verdict():
     md = "Title\n<!--IMG:hero-->\n## Section 1\nBody"
     ctx = _ctx({
-        "_critic_raw": '{"verdict": "accept", "feedback": ""}',
+        "critic_raw": '{"verdict": "accept", "feedback": ""}',
         "draft": _draft(md),
         "image_briefs": _briefs(["hero"]),
         "needs_video": False,
@@ -51,7 +51,7 @@ def test_parses_clean_accept_verdict():
 def test_parses_revise_verdict_with_feedback():
     md = "Title\n<!--IMG:hero-->\n## Section 1\nBody"
     ctx = _ctx({
-        "_critic_raw": '{"verdict": "revise", "feedback": "tighten intro"}',
+        "critic_raw": '{"verdict": "revise", "feedback": "tighten intro"}',
         "draft": _draft(md),
         "image_briefs": _briefs(["hero"]),
         "needs_video": False,
@@ -65,7 +65,7 @@ def test_parses_revise_verdict_with_feedback():
 def test_strips_markdown_fences_around_json():
     md = "<!--IMG:hero-->"
     ctx = _ctx({
-        "_critic_raw": '```json\n{"verdict": "accept", "feedback": ""}\n```',
+        "critic_raw": '```json\n{"verdict": "accept", "feedback": ""}\n```',
         "draft": _draft(md),
         "image_briefs": _briefs(["hero"]),
         "needs_video": False,
@@ -78,7 +78,7 @@ def test_strips_markdown_fences_around_json():
 def test_recovers_json_when_prose_around_it():
     md = "<!--IMG:hero-->"
     ctx = _ctx({
-        "_critic_raw": 'Here is my verdict: {"verdict": "accept", "feedback": ""} — done.',
+        "critic_raw": 'Here is my verdict: {"verdict": "accept", "feedback": ""} — done.',
         "draft": _draft(md),
         "image_briefs": _briefs(["hero"]),
         "needs_video": False,
@@ -91,7 +91,7 @@ def test_recovers_json_when_prose_around_it():
 def test_unparseable_json_coerced_to_revise():
     md = "<!--IMG:hero-->"
     ctx = _ctx({
-        "_critic_raw": "not json at all",
+        "critic_raw": "not json at all",
         "draft": _draft(md),
         "image_briefs": _briefs(["hero"]),
         "needs_video": False,
@@ -105,7 +105,7 @@ def test_unparseable_json_coerced_to_revise():
 def test_unknown_verdict_value_coerced_to_revise():
     md = "<!--IMG:hero-->"
     ctx = _ctx({
-        "_critic_raw": '{"verdict": "yikes", "feedback": ""}',
+        "critic_raw": '{"verdict": "yikes", "feedback": ""}',
         "draft": _draft(md),
         "image_briefs": _briefs(["hero"]),
         "needs_video": False,
@@ -123,7 +123,7 @@ def test_image_marker_count_mismatch_overrides_accept_to_revise():
     The critic_split MUST override to revise. Bug B2 belt + suspenders."""
     md = "<!--IMG:hero--><!--IMG:section_1-->"  # 2 markers
     ctx = _ctx({
-        "_critic_raw": '{"verdict": "accept", "feedback": ""}',
+        "critic_raw": '{"verdict": "accept", "feedback": ""}',
         "draft": _draft(md),
         "image_briefs": _briefs(["hero", "section_1", "section_2"]),  # 3 briefs
         "needs_video": False,
@@ -139,7 +139,7 @@ def test_video_marker_present_when_needs_video_false_overrides_accept():
     LLM said accept; critic_split overrides to revise."""
     md = "<!--IMG:hero--><!--VID:hero-->"
     ctx = _ctx({
-        "_critic_raw": '{"verdict": "accept", "feedback": ""}',
+        "critic_raw": '{"verdict": "accept", "feedback": ""}',
         "draft": _draft(md),
         "image_briefs": _briefs(["hero"]),
         "needs_video": False,  # but VID marker IS in draft
@@ -154,7 +154,7 @@ def test_video_marker_missing_when_needs_video_true_overrides_accept():
     """Forward case: needs_video=True but no VID marker. Override to revise."""
     md = "<!--IMG:hero-->"  # no VID marker
     ctx = _ctx({
-        "_critic_raw": '{"verdict": "accept", "feedback": ""}',
+        "critic_raw": '{"verdict": "accept", "feedback": ""}',
         "draft": _draft(md),
         "image_briefs": _briefs(["hero"]),
         "needs_video": True,  # marker required but missing
@@ -167,7 +167,7 @@ def test_video_marker_missing_when_needs_video_true_overrides_accept():
 def test_iteration_counter_increments_each_call():
     md = "<!--IMG:hero-->"
     ctx = _ctx({
-        "_critic_raw": '{"verdict": "accept", "feedback": ""}',
+        "critic_raw": '{"verdict": "accept", "feedback": ""}',
         "draft": _draft(md),
         "image_briefs": _briefs(["hero"]),
         "needs_video": False,
