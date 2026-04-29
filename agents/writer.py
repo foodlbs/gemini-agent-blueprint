@@ -6,31 +6,20 @@ nodes/critic_split.py)."""
 
 from google.adk import Agent
 
+from shared.prompts import CRITIC_INSTRUCTION, DRAFTER_INSTRUCTION
 
-# TODO §6.6.1 — fill in DRAFTER_INSTRUCTION:
-#   - Iteration 0: write from scratch using outline + research.
-#   - Iteration 1+: rewrite previous draft per critic_feedback.
-#   - Mandate <!--IMG:position--> and <!--VID:hero--> placeholders.
+
 drafter = Agent(
     name="drafter",
     model="gemini-3.1-pro",
-    instruction=(
-        "TODO §6.6.1 — generate or rewrite the article markdown matching "
-        "outline; insert image/video placeholders at section boundaries."
-    ),
+    instruction=DRAFTER_INSTRUCTION,
     output_key="draft",
 )
 
 
-# TODO §6.6.2 — fill in CRITIC_INSTRUCTION (8-item rubric: word count,
-# section headings, image/video placeholder presence, title mention,
-# fact grounding, etc.).
 critic_llm = Agent(
     name="critic_llm",
     model="gemini-3.1-flash",
-    instruction=(
-        "TODO §6.6.2 — score draft against 8-item rubric; emit "
-        "single-line JSON {verdict: accept|revise, feedback: str}."
-    ),
+    instruction=CRITIC_INSTRUCTION,
     output_key="_critic_raw",
 )

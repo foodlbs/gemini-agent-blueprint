@@ -5,18 +5,12 @@ human is involved, the structural rubric is bypassed."""
 
 from google.adk import Agent
 
+from shared.prompts import REVISION_WRITER_INSTRUCTION
 
-# TODO §6.10 — fill in REVISION_WRITER_INSTRUCTION:
-#   - Read draft.markdown + human_feedback.feedback.
-#   - Apply feedback while preserving section headings, image/video markers,
-#     and ±20% word count budget.
-#   - Empty feedback → "improve clarity and concision throughout."
+
 revision_writer = Agent(
     name="revision_writer",
     model="gemini-3.1-pro",
-    instruction=(
-        "TODO §6.10 — rewrite draft.markdown per human_feedback; "
-        "preserve <!--IMG:--> and <!--VID:--> markers; emit Draft."
-    ),
+    instruction=REVISION_WRITER_INSTRUCTION,
     output_key="draft",
 )
