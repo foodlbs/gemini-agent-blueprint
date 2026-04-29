@@ -1,4 +1,10 @@
-"""Pydantic models for ADK session state. State keys named in DESIGN.md map to fields here."""
+"""Pydantic models for the v2 Workflow's typed state.
+
+DESIGN.v2.md §4 is normative — every field, type, and default here matches
+the design's `PipelineState` definition. The Workflow declares
+``state_schema=PipelineState`` so ADK enforces these types at construction
+time and at every ``ctx.state[...]`` write.
+"""
 
 from datetime import datetime
 from typing import Literal, Optional
@@ -31,6 +37,16 @@ ArticleType = Literal["quickstart", "explainer", "comparison", "release_recap"]
 ImageStyle = Literal["photoreal", "diagram", "illustration", "screenshot"]
 AspectRatio = Literal["16:9", "4:3"]
 CriticVerdict = Literal["accept", "revise"]
+TopicDecision = Literal["approve", "skip", "timeout"]
+EditorDecision = Literal["approve", "reject", "revise", "timeout"]
+CycleOutcome = Literal[
+    "skipped_by_triage",
+    "skipped_by_human_topic",
+    "topic_timeout",
+    "rejected_by_editor",
+    "editor_timeout",
+    "published",
+]
 
 
 class Candidate(BaseModel):
@@ -48,7 +64,7 @@ class ChosenRelease(Candidate):
 
 
 class TopicVerdict(BaseModel):
-    verdict: Literal["approve", "skip", "timeout"]
+    verdict: TopicDecision
     at: datetime
 
 
@@ -119,6 +135,89 @@ class RevisionFeedback(BaseModel):
 
 
 class EditorVerdict(BaseModel):
-    verdict: Literal["approve", "reject", "revise", "pending_human"]
+    verdict: EditorDecision
     feedback: Optional[str] = None
     at: datetime
+
+
+class StarterRepo(BaseModel):
+    """Result of repo_builder when needs_repo=True. Per §6.8.2 + §4."""
+    url: str
+    files_committed: list[str]
+    sha: str
+
+
+class PipelineState(BaseModel):
+    """Top-level Workflow state schema — every key the v2 graph touches.
+
+    The Workflow declares ``state_schema=PipelineState`` so ADK validates
+    every ``ctx.state[...]`` write against the type. Function nodes whose
+    parameters name state keys auto-bind from this schema.
+
+    Field order matches DESIGN.v2.md §4. Lifecycle (who writes / who reads)
+    is documented in §4's "Field lifecycle table."
+    """
+
+    # --- Trigger / scheduling ------------------------------------------------
+    last_run_at: Optional[datetime] = None
+    """Set by the trigger entry node from the Cloud Scheduler payload."""
+
+    # --- Scout ---------------------------------------------------------------
+    candidates: list[Candidate] = Field(default_factory=list)
+    """All candidate releases collected by Scout this cycle."""
+
+    # --- Triage --------------------------------------------------------------
+    chosen_release: Optional[ChosenRelease] = None
+    """The one candidate Triage picked, OR None if Triage skipped."""
+    skip_reason: Optional[str] = None
+    """Set when chosen_release is None. Free-text explanation."""
+
+    # --- Topic Gate (HITL #1) ------------------------------------------------
+    topic_verdict: Optional[TopicVerdict] = None
+    """The human's response to the topic-approval Telegram post."""
+
+    # --- Researcher pool -----------------------------------------------------
+    docs_research: Optional[ResearchDossier] = None
+    github_research: Optional[ResearchDossier] = None
+    context_research: Optional[ResearchDossier] = None
+    research: Optional[ResearchDossier] = None
+    """Merged dossier produced by gather_research from the three above."""
+
+    # --- Architect -----------------------------------------------------------
+    outline: Optional[Outline] = None
+    image_briefs: list[ImageBrief] = Field(default_factory=list)
+    video_brief: Optional[VideoBrief] = None
+    needs_video: bool = False
+    needs_repo: bool = False
+
+    # --- Writer loop ---------------------------------------------------------
+    draft: Optional[Draft] = None
+    """Current draft being iterated. Drafter writes; Critic annotates."""
+    writer_iterations: int = 0
+    """Hard cap counter — route_critic_verdict forces ACCEPT once this hits 3."""
+
+    # --- Asset agent ---------------------------------------------------------
+    image_assets: list[ImageAsset] = Field(default_factory=list)
+    video_asset: Optional[VideoAsset] = None
+
+    # --- Repo Builder (conditional) -----------------------------------------
+    starter_repo: Optional[StarterRepo] = None
+
+    # --- Editor (HITL #2) + Revision Writer loop ----------------------------
+    editor_verdict: Optional[EditorVerdict] = None
+    human_feedback: Optional[RevisionFeedback] = None
+    """Set by record_editor_verdict on revise; consumed by revision_writer."""
+    editor_iterations: int = 0
+    """Hard cap counter — record_editor_verdict forces approve/reject after 3."""
+
+    # --- Publisher -----------------------------------------------------------
+    final_markdown: Optional[str] = None
+    """Medium-formatted final draft, written by publisher."""
+    asset_bundle_url: Optional[str] = None
+    """GCS URL of the bundled assets (markdown + images + video)."""
+    memory_bank_recorded: bool = False
+    """True after publisher writes the `covered` Memory Bank fact."""
+
+    # --- Cycle outcome (set by exactly one terminal node) -------------------
+    cycle_outcome: Optional[CycleOutcome] = None
+    """Set by exactly one terminal node. Read by post-cycle reporting."""
