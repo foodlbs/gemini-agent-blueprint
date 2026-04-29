@@ -1,0 +1,45 @@
+[project]
+name = "ai-release-pipeline"
+version = "0.1.0"
+description = "Polling multi-agent content pipeline for AI releases on Gemini ADK"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "google-adk>=1.31",
+    "google-cloud-aiplatform",
+    "google-cloud-storage",
+    "PyGithub",
+    "feedparser",
+    "arxiv",
+    "huggingface_hub",
+    "python-telegram-bot",
+    "pydantic",
+    "ffmpeg-python",
+    "Pillow",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.agents-cli]
+name = "ai-release-pipeline"
+description = "Polling multi-agent content pipeline for AI releases on Gemini ADK"
+base_template = "adk"
+agent_directory = "app"
+generated_at = "2026-04-28T04:30:00Z"
+acli_version = "0.1.1"
+
+[tool.agents-cli.create_params]
+deployment_target = "cloud_run"
+session_type = "in_memory"
+cicd_runner = "skip"
+include_data_ingestion = false
+datastore = "none"
