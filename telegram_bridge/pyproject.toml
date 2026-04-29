@@ -1,0 +1,19 @@
+[project]
+name = "ai-release-pipeline-v2-telegram-bridge"
+version = "2.0.0"
+description = "Telegram → Agent Runtime resume bridge — Cloud Run service"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1",
+    "requests>=2.32,<3",
+    "google-auth>=2.31,<3",
+    "google-cloud-firestore>=2.14,<3",
+    "pydantic>=2.5,<3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27,<1",  # FastAPI TestClient backend
+]
