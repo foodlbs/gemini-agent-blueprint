@@ -1,3 +1,0 @@
-functions-framework>=3.5
-google-auth>=2.31
-requests>=2.32

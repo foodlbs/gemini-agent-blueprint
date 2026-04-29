@@ -332,33 +332,9 @@ def test_poll_anthropic_news_returns_empty_on_failure(since):
 
 
 # --- Scout agent wiring ------------------------------------------------------
-
-
-def test_scout_agent_wires_all_pollers():
-    from agents.scout.agent import scout
-
-    assert scout.name == "scout"
-    assert scout.model == "gemini-3.1-flash-lite-preview"
-    tool_names = {getattr(t, "__name__", str(t)) for t in scout.tools}
-    assert tool_names == {
-        "poll_arxiv",
-        "poll_github_trending",
-        "poll_rss",
-        "poll_hf_models",
-        "poll_hf_papers",
-        "poll_hackernews_ai",
-        "poll_anthropic_news",
-    }
-    assert scout.output_key == "candidates"
-
-
-def test_scout_agent_instruction_loaded_verbatim_from_prompts():
-    from agents.scout.agent import scout
-    from shared.prompts import SCOUT_INSTRUCTION
-
-    assert scout.instruction == SCOUT_INSTRUCTION
-    assert "Scout" in scout.instruction
-    assert 'state["candidates"]' in scout.instruction
+# (v1's agent-wiring tests removed during v1→v2 cleanup. v2 wiring will live
+# in tests/test_workflow.py per DESIGN.v2.md §13.2 once the new agent.py
+# Workflow is implemented.)
 
 
 # --- Scout state["candidates"] population ------------------------------------
