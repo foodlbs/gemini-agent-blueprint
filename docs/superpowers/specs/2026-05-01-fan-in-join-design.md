@@ -169,12 +169,14 @@ gather_research = JoinFunctionNode(
 ### `shared/models.py` — add to `PipelineState`
 
 ```python
-gather_research_call_count: Optional[int] = None
+gather_research_call_count: int = 0
 ```
 
-Naming convention matches existing `chosen_release_write_count`. Avoid
-leading underscore (Pydantic treats `_field` as PrivateAttr, which would
-break the state-field declaration).
+Type and default match the existing `chosen_release_write_count` pattern
+exactly. `int = 0` (not `Optional[int] = None`) so `state.get(key, 0) + 1`
+always works without None-handling. Avoid leading underscore (Pydantic
+treats `_field` as PrivateAttr, which would break the state-field
+declaration).
 
 ### `agent.py` — zero changes
 
