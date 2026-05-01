@@ -1,52 +1,54 @@
 # Outputs the operator copies into deploy.py / Cloud Run / Cloud Scheduler
-# configuration after `terraform apply` succeeds.
+# configuration after `terraform apply` succeeds. All names derived from
+# var.project_name so deploy.py can reconstruct them via PROJECT_PREFIX.
 
 output "service_account_app" {
-  description = "Email of the Agent Runtime runtime SA — passed to deploy.py."
-  value       = google_service_account.app.email
+  description = "Email of the Agent Runtime SA."
+  value       = "${local.sa_app}@${var.project}.iam.gserviceaccount.com"
 }
 
 output "service_account_bridge" {
   description = "Email of the Telegram bridge Cloud Run SA."
-  value       = google_service_account.bridge.email
+  value       = "${local.sa_bridge}@${var.project}.iam.gserviceaccount.com"
 }
 
 output "service_account_scheduler" {
-  description = "Email of the Cloud Scheduler OIDC SA."
-  value       = google_service_account.scheduler.email
+  description = "Email of the Cloud Scheduler SA."
+  value       = "${local.sa_scheduler}@${var.project}.iam.gserviceaccount.com"
 }
 
-output "assets_bucket" {
-  description = "GCS bucket for image/video asset hosting."
-  value       = google_storage_bucket.assets.name
+output "bucket_assets" {
+  description = "Public-read GCS bucket for image/video assets."
+  value       = local.bucket_assets
 }
 
-output "staging_bucket" {
-  description = "GCS bucket for Vertex AI source tarball uploads (deploy.py)."
-  value       = google_storage_bucket.staging.name
+output "bucket_staging" {
+  description = "GCS bucket for Vertex SDK source-tarball uploads."
+  value       = local.bucket_staging
 }
 
 output "secret_github_token_id" {
-  description = "Resource ID of the GitHub PAT secret."
-  value       = google_secret_manager_secret.github_token.id
+  description = "Secret Manager ID for the GitHub PAT."
+  value       = local.secret_github
 }
 
 output "secret_telegram_bot_token_id" {
-  description = "Resource ID of the Telegram bot token secret."
-  value       = google_secret_manager_secret.telegram_bot_token.id
+  description = "Secret Manager ID for the Telegram bot token."
+  value       = local.secret_telegram
 }
 
-output "secret_telegram_webhook_secret_id" {
-  description = "Resource ID of the Telegram webhook secret."
-  value       = google_secret_manager_secret.telegram_webhook_secret.id
+output "secret_webhook_secret_id" {
+  description = "Secret Manager ID for the Telegram webhook verification secret."
+  value       = local.secret_webhook
 }
 
 output "telegram_webhook_secret_value" {
-  description = <<-EOT
-    Generated webhook-verification token (32 random bytes hex).
-    Telegram echoes this on every webhook call. Used in setWebhook
-    after the bridge is deployed (see README.md).
-  EOT
-  value     = random_id.webhook_secret.hex
-  sensitive = true
+  description = "Plaintext value of the Telegram webhook secret (use to register the webhook with Telegram)."
+  value       = random_id.webhook_secret.hex
+  sensitive   = true
+}
+
+output "project_name" {
+  description = "The resource-name prefix in use. Pass to deploy.py via TF_VAR_project_name or PROJECT_PREFIX."
+  value       = var.project_name
 }

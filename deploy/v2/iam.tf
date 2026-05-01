@@ -1,10 +1,10 @@
 # Service accounts + IAM bindings for ai-release-pipeline-v2.
 # DESIGN.v2.md §10.3.
 #
-# Three SAs, one per long-lived resource:
-#   - airel-v2-app             → Agent Runtime ReasoningEngine
-#   - airel-v2-telegram-bridge → Cloud Run service
-#   - airel-v2-scheduler       → Cloud Scheduler jobs
+# Three SAs, one per long-lived resource (all derived from var.project_name):
+#   - ${var.project_name}-app             → Agent Runtime ReasoningEngine
+#   - ${var.project_name}-telegram-bridge → Cloud Run service
+#   - ${var.project_name}-scheduler       → Cloud Scheduler jobs
 #
 # Bindings on resources NOT in this module (Memory Bank, the engine
 # itself, the bridge Cloud Run) are documented in README.md as
@@ -15,25 +15,25 @@
 # ---------------------------------------------------------------------------
 
 resource "google_service_account" "app" {
-  account_id   = "airel-v2-app"
+  account_id   = local.sa_app
   display_name = "AI Release Pipeline v2 — Agent Runtime"
   description  = "Runtime SA for the v2 ReasoningEngine. DESIGN.v2.md §10.3."
 }
 
 resource "google_service_account" "bridge" {
-  account_id   = "airel-v2-telegram-bridge"
+  account_id   = local.sa_bridge
   display_name = "AI Release Pipeline v2 — Telegram Bridge"
   description  = "Cloud Run runtime SA for the Telegram webhook bridge. DESIGN.v2.md §10.3."
 }
 
 resource "google_service_account" "scheduler" {
-  account_id   = "airel-v2-scheduler"
+  account_id   = local.sa_scheduler
   display_name = "AI Release Pipeline v2 — Cloud Scheduler"
   description  = "OIDC token issuer for hourly cron + 15-min sweeper. DESIGN.v2.md §10.3."
 }
 
 # ---------------------------------------------------------------------------
-# airel-v2-app — Agent Runtime runtime SA
+# app SA (local.sa_app) — Agent Runtime runtime SA
 # ---------------------------------------------------------------------------
 
 # Project-level: Vertex AI (Gemini, Imagen, Veo, Memory Bank API), Firestore,
@@ -109,7 +109,7 @@ resource "google_secret_manager_secret_iam_member" "app_telegram_bot_token" {
 # above covers Memory Bank API access. See README.md for details.
 
 # ---------------------------------------------------------------------------
-# airel-v2-telegram-bridge — Cloud Run runtime SA
+# bridge SA (local.sa_bridge) — Cloud Run runtime SA
 # ---------------------------------------------------------------------------
 
 resource "google_project_iam_member" "bridge_aiplatform_user" {
@@ -149,7 +149,7 @@ resource "google_secret_manager_secret_iam_member" "bridge_webhook_secret" {
 # is sufficient until then. README.md tracks the optional tightening.
 
 # ---------------------------------------------------------------------------
-# airel-v2-scheduler — Cloud Scheduler OIDC SA
+# scheduler SA (local.sa_scheduler) — Cloud Scheduler OIDC SA
 # ---------------------------------------------------------------------------
 
 # The scheduler SA only needs project-wide aiplatform.user to call
