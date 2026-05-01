@@ -54,7 +54,7 @@ secrets it consumes) before running anything below:
 export TF_VAR_project_name=gab            # default; rename for your fork
 
 # Required GCP project (no default).
-export TF_VAR_project=$(echo $GOOGLE_CLOUD_PROJECT)
+export TF_VAR_project="${GOOGLE_CLOUD_PROJECT}"
 
 # Required secret-backed values (read once from .env or your shell).
 export TF_VAR_github_token=$(grep -E '^GITHUB_TOKEN=' ../../.env | cut -d= -f2-)
@@ -258,7 +258,7 @@ curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
 gcloud scheduler jobs run "${TF_VAR_project_name}-hourly" --location=us-west1
 ```
 
-Expected: a Telegram message lands in chat 8481672863 with Approve/Skip
+Expected: a Telegram message lands in your $TELEGRAM_APPROVAL_CHAT_ID with Approve/Skip
 buttons. Tap Approve → research runs → second message with the draft.
 
 If both work end-to-end:
