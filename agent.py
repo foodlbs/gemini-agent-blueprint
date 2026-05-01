@@ -15,6 +15,8 @@ Wiring rules:
     set `cycle_outcome`.
 """
 
+import os
+
 from google.adk import Workflow
 
 from agents.architect import architect_llm
@@ -58,7 +60,7 @@ from shared.models import PipelineState
 
 
 root_agent = Workflow(
-    name="ai_release_pipeline_v2",
+    name=os.environ.get("PROJECT_APP_NAME", "gemini_agent_blueprint"),
     state_schema=PipelineState,
     edges=[
         # --- 1. Scout → scout_split → Triage → route on chosen_release ---
