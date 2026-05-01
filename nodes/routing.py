@@ -32,7 +32,7 @@ def route_topic_verdict(node_input, ctx: Context) -> Event:
 def route_critic_verdict(node_input, ctx: Context) -> Event:
     """§6.6.4 — REVISE/ACCEPT, forced ACCEPT at writer_iterations >= cap."""
     iteration = ctx.state.get("writer_iterations", 0)
-    verdict = ctx.state["draft"].critic_verdict
+    verdict = ctx.state.get("critic_verdict")
     if iteration >= MAX_WRITER_ITERATIONS:
         ctx.route = "ACCEPT"
         return Event(output={"route": "ACCEPT", "forced": True, "iteration": iteration})

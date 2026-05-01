@@ -39,7 +39,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import requests
-from fastapi import FastAPI, Header, HTTPException, status
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -177,24 +177,42 @@ def _function_name_for_interrupt(interrupt_id: str) -> str:
 
 
 def _mint_oidc_token(audience: str) -> str:
-    """Fetches an ID token for ``audience`` (the Agent Runtime hostname)
-    using Cloud Run's metadata server (or ADC for local dev)."""
+    """Fetches an OAuth 2.0 access token for direct Vertex AI REST calls.
+
+    Despite the function name (kept for backward compat with tests), this
+    mints an ACCESS token, not an ID token. Vertex AI's REST endpoints
+    (`:streamQuery` etc.) reject ID tokens with 401; only access tokens
+    work for direct API calls. ID tokens are for Cloud Scheduler-style
+    invocation where the receiving service validates the token claims.
+
+    The `audience` param is unused but kept in the signature so existing
+    test mocks (`patch.object(bridge, "_mint_oidc_token", ...)`) continue
+    to work.
+    """
+    del audience  # parameter retained for signature stability
+    import google.auth
     import google.auth.transport.requests
-    from google.oauth2 import id_token
-    auth_req = google.auth.transport.requests.Request()
-    return id_token.fetch_id_token(auth_req, audience)
+    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    creds.refresh(google.auth.transport.requests.Request())
+    return creds.token
 
 
 def resume_session(
     session_id: str,
     interrupt_id: str,
     decision: str,
+    user_id: str,
     feedback: Optional[str] = None,
-    timeout_seconds: int = 30,
+    timeout_seconds: int = 90,
 ) -> dict:
     """POST a FunctionResponse to the Agent Runtime to resume the paused
     workflow. Drains the first few SSE events to confirm the resume
-    landed; the workflow continues detached."""
+    landed; the workflow continues detached.
+
+    `user_id` MUST match the user who created the session — Vertex's
+    session service rejects cross-user resume attempts with a
+    ValueError. The originating `user_id` is stored in the Firestore
+    session-lookup doc by `tools/telegram._write_session_lookup`."""
     endpoint = _agent_runtime_endpoint().rstrip("/")
     target_url = f"{endpoint}:streamQuery?alt=sse"
 
@@ -205,7 +223,7 @@ def resume_session(
     body = {
         "class_method": "stream_query",
         "input": {
-            "user_id": "telegram-bridge",
+            "user_id": user_id,
             "session_id": session_id,
             "message": {
                 "role": "user",
@@ -226,14 +244,22 @@ def resume_session(
         "Authorization": f"Bearer {_mint_oidc_token(audience)}",
         "Content-Type":  "application/json",
     }
-    with requests.post(target_url, json=body, headers=headers, stream=True, timeout=timeout_seconds) as resp:
+    # Drain the full SSE stream. Closing the connection mid-stream
+    # appears to cancel server-side workflow execution in Vertex's
+    # ReasoningEngine — bailing early after 1 event left record_*_verdict
+    # writes and publisher state never persisted (verified with
+    # editor_verdict=None despite a clean 200 OK on the resume POST).
+    #
+    # (connect, read) tuple: connect fails fast; read is generous because
+    # the full response only completes after the workflow either pauses
+    # again or finishes (publisher run takes ~60s).
+    timeouts = (10, timeout_seconds)
+    with requests.post(target_url, json=body, headers=headers, stream=True, timeout=timeouts) as resp:
         resp.raise_for_status()
         events_drained = 0
         for line in resp.iter_lines():
             if line and line.startswith(b"data: "):
                 events_drained += 1
-                if events_drained >= 3:
-                    break
         return {"resumed": True, "events_drained": events_drained}
 
 
@@ -255,6 +281,7 @@ def post_telegram(method: str, payload: dict) -> dict:
 @app.post("/telegram/webhook")
 def telegram_webhook(
     update: dict,
+    background_tasks: BackgroundTasks,
     x_telegram_bot_api_secret_token: Optional[str] = Header(default=None),
 ) -> dict:
     expected_secret = _required_env("TELEGRAM_WEBHOOK_SECRET")
@@ -264,23 +291,31 @@ def telegram_webhook(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid webhook secret")
 
     if "callback_query" in update:
-        return _handle_callback_query(update["callback_query"])
+        return _handle_callback_query(update["callback_query"], background_tasks)
 
     if "message" in update:
-        return _handle_message(update["message"])
+        return _handle_message(update["message"], background_tasks)
 
     # Other update kinds — ignore.
     return {"ok": True, "ignored": list(update.keys())}
 
 
-def _handle_callback_query(cbq: dict) -> dict:
+def _handle_callback_query(cbq: dict, background_tasks: BackgroundTasks) -> dict:
     """A button tap. Resolve to (session_id, interrupt_id, choice) and
     either resume immediately (approve/skip/reject) or send a ForceReply
-    prompt (revise)."""
+    prompt (revise).
+
+    The actual `resume_session` POST to Vertex's `:streamQuery` is dispatched
+    as a background task — we ack the Telegram callback fast (~1s) so
+    Telegram doesn't time out and retry, while the workflow's downstream
+    nodes (publisher, etc.) run server-side and produce their own final
+    Telegram notification when they finish."""
     callback_data = cbq.get("data", "")
     cbq_id = cbq.get("id", "")
-    chat = cbq.get("message", {}).get("chat", {})
+    msg = cbq.get("message", {}) or {}
+    chat = msg.get("chat", {}) or {}
     chat_id = chat.get("id")
+    message_id = msg.get("message_id")
 
     try:
         parts = parse_callback_data(callback_data)
@@ -305,6 +340,19 @@ def _handle_callback_query(cbq: dict) -> dict:
         _answer_callback_query(cbq_id, "This approval is stale (a newer one supersedes it).")
         return {"ok": False, "reason": "interrupt_prefix_mismatch"}
 
+    # Idempotency: refuse to re-resume an already-terminated session.
+    # Without this, a double-tap (user not seeing buttons disappear and
+    # tapping again) would trigger two resumes — and a Vertex resume
+    # against an already-resumed interrupt re-enters the workflow loop
+    # instead of advancing it, producing duplicate editor messages.
+    if sess.get("terminated"):
+        logger.info(
+            "Duplicate tap ignored: session %s already terminated (interrupt=%s)",
+            parts.session_prefix, full_interrupt_id,
+        )
+        _answer_callback_query(cbq_id, "Already recorded — pipeline is processing.")
+        return {"ok": True, "duplicate": True, "reason": "already_terminated"}
+
     if parts.choice == "revise":
         # Operator wants to revise. Send a ForceReply prompt; capture the
         # follow-up message in the next webhook call.
@@ -318,23 +366,70 @@ def _handle_callback_query(cbq: dict) -> dict:
         _answer_callback_query(cbq_id, "Revise: please reply with feedback.")
         return {"ok": True, "awaiting_force_reply": True}
 
-    # approve / skip / reject — resume immediately.
-    try:
-        resume_session(
-            session_id=full_session_id,
-            interrupt_id=full_interrupt_id,
-            decision=parts.choice,
-        )
-        mark_session_terminated(parts.session_prefix)
-        _answer_callback_query(cbq_id, f"Recorded: {parts.choice}.")
-        return {"ok": True, "decision": parts.choice}
-    except Exception as e:
-        logger.error("resume_session failed for %s: %s", parts.session_prefix, e)
-        _answer_callback_query(cbq_id, "Server error — try again or check logs.")
-        raise HTTPException(status_code=500, detail=str(e))
+    # approve / skip / reject — fire-and-forget the resume so we can ack
+    # Telegram in <1s. Without this, the bridge handler hangs ~60-90s
+    # (until publisher finishes and Vertex closes the SSE stream),
+    # which exceeds Telegram's webhook timeout and triggers retry storms.
+    user_id_for_resume = sess.get("user_id", "scheduler")
+    decision = parts.choice
+    session_prefix = parts.session_prefix
+
+    # Mark terminated FIRST (synchronously, before background task runs)
+    # so a double-tap arriving in the 30-90s resume window hits the
+    # `if sess.get("terminated")` guard above and is rejected.
+    mark_session_terminated(session_prefix)
+    logger.info(
+        "callback_query: choice=%r, session_prefix=%s, interrupt=%s, user_id=%s",
+        decision, session_prefix, full_interrupt_id, user_id_for_resume,
+    )
+
+    def _resume_in_background() -> None:
+        try:
+            logger.info("Background resume START: %s decision=%s",
+                        session_prefix, decision)
+            resume_session(
+                session_id=full_session_id,
+                interrupt_id=full_interrupt_id,
+                decision=decision,
+                user_id=user_id_for_resume,
+            )
+            logger.info("Background resume DONE: %s decision=%s",
+                        session_prefix, decision)
+        except Exception as e:
+            logger.error("resume_session failed for %s: %s", session_prefix, e)
+
+    background_tasks.add_task(_resume_in_background)
+    _answer_callback_query(cbq_id, f"Recorded: {parts.choice}.")
+    _acknowledge_in_chat(chat_id, message_id, parts.choice)
+    return {"ok": True, "decision": parts.choice, "background": True}
 
 
-def _handle_message(msg: dict) -> dict:
+def _acknowledge_in_chat(chat_id: Any, message_id: Optional[int], choice: str) -> None:
+    """Visible feedback after a button tap. Removes the buttons from the
+    original message (so the operator can see their tap was registered)
+    and posts a short confirmation. Failures here are logged but do not
+    abort the resume — the workflow has already restarted."""
+    icon = {"approve": "✅", "skip": "⏭️", "reject": "🛑"}.get(choice, "•")
+    if message_id is not None and chat_id is not None:
+        try:
+            post_telegram("editMessageReplyMarkup", {
+                "chat_id":      chat_id,
+                "message_id":   message_id,
+                "reply_markup": {"inline_keyboard": []},
+            })
+        except Exception as e:
+            logger.warning("editMessageReplyMarkup failed: %s", e)
+    if chat_id is not None:
+        try:
+            post_telegram("sendMessage", {
+                "chat_id": chat_id,
+                "text":    f"{icon} {choice.capitalize()}. Continuing pipeline — the next message will arrive in 2-5 minutes.",
+            })
+        except Exception as e:
+            logger.warning("sendMessage (ack) failed: %s", e)
+
+
+def _handle_message(msg: dict, background_tasks: BackgroundTasks) -> dict:
     """A regular message. Most are noise; the only ones we care about are
     replies to a ForceReply prompt that we sent (revise feedback)."""
     reply_to = msg.get("reply_to_message") or {}
@@ -349,19 +444,24 @@ def _handle_message(msg: dict) -> dict:
     feedback = msg.get("text") or ""
     full_session_id   = sess["session_id_full"]
     full_interrupt_id = sess["interrupt_id_full"]
+    user_id_for_resume = sess.get("user_id", "scheduler")
+    doc_id = sess["_doc_id"]
 
-    try:
-        resume_session(
-            session_id=full_session_id,
-            interrupt_id=full_interrupt_id,
-            decision="revise",
-            feedback=feedback,
-        )
-        mark_session_terminated(sess["_doc_id"])
-        return {"ok": True, "decision": "revise", "feedback_chars": len(feedback)}
-    except Exception as e:
-        logger.error("resume_session failed (revise) for %s: %s", sess["_doc_id"], e)
-        raise HTTPException(status_code=500, detail=str(e))
+    def _resume_in_background() -> None:
+        try:
+            resume_session(
+                session_id=full_session_id,
+                interrupt_id=full_interrupt_id,
+                decision="revise",
+                user_id=user_id_for_resume,
+                feedback=feedback,
+            )
+            mark_session_terminated(doc_id)
+        except Exception as e:
+            logger.error("resume_session failed (revise) for %s: %s", doc_id, e)
+
+    background_tasks.add_task(_resume_in_background)
+    return {"ok": True, "decision": "revise", "feedback_chars": len(feedback), "background": True}
 
 
 def _answer_callback_query(callback_query_id: str, text: str) -> None:
@@ -408,6 +508,7 @@ def sweeper_escalate() -> dict:
                 session_id=data["session_id_full"],
                 interrupt_id=data["interrupt_id_full"],
                 decision="timeout",
+                user_id=data.get("user_id", "scheduler"),
             )
             mark_session_terminated(doc.id)
             timed_out += 1

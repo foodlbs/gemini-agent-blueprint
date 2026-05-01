@@ -20,10 +20,15 @@ _client_singleton: Optional[storage.Client] = None
 
 
 def _client() -> storage.Client:
-    """Lazily build a single Cloud Storage client."""
+    """Lazily build a single Cloud Storage client.
+
+    Passing `project=` explicitly avoids the Cloud Resource Manager
+    auto-detect call (which 403s if cloudresourcemanager.googleapis.com
+    isn't enabled on the project)."""
     global _client_singleton
     if _client_singleton is None:
-        _client_singleton = storage.Client()
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        _client_singleton = storage.Client(project=project)
     return _client_singleton
 
 

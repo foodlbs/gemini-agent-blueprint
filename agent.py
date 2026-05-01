@@ -18,7 +18,6 @@ Wiring rules:
 from google.adk import Workflow
 
 from agents.architect import architect_llm
-from agents.assets import image_asset_agent
 from agents.repo_builder import repo_builder
 from agents.researchers import (
     context_researcher,
@@ -34,6 +33,7 @@ from nodes.aggregation import gather_assets, gather_research
 from nodes.architect_split import architect_split
 from nodes.critic_split import critic_split
 from nodes.hitl import editor_request, topic_gate_request
+from nodes.image_assets import image_asset_node
 from nodes.publisher import publisher
 from nodes.records import (
     record_editor_rejection,
@@ -85,12 +85,15 @@ root_agent = Workflow(
                                        critic_llm, critic_split,
                                        route_critic_verdict, {
             "REVISE": drafter,
-            "ACCEPT": (image_asset_agent, video_asset_or_skip),
+            "ACCEPT": image_asset_node,
         }),
 
-        # --- 4. Asset join → repo router → editor ------------------------
-        (image_asset_agent,    gather_assets),
-        (video_asset_or_skip,  gather_assets),
+        # --- 4. Asset chain → repo router → editor ------------------------
+        # Image generation is now a function node (no LLM) — Imagen's
+        # raw PNG bytes used to balloon the LlmAgent context past the
+        # 1M-token cap on the second call. Sequential chain ensures the
+        # gather_assets barrier sees fully-populated state.
+        (image_asset_node, video_asset_or_skip, gather_assets),
         (gather_assets, route_needs_repo, {
             "WITH_REPO":    repo_builder,
             "WITHOUT_REPO": editor_request,

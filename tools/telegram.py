@@ -99,12 +99,21 @@ def callback_data(session_id: str, choice: str, interrupt_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _write_session_lookup(session_id: str, interrupt_id: str) -> None:
-    """Persist (session_prefix → full_session_id, full_interrupt_id) to Firestore.
+def _write_session_lookup(
+    session_id: str, interrupt_id: str, user_id: str,
+) -> None:
+    """Persist (session_prefix → full_session_id, full_interrupt_id, user_id)
+    to Firestore.
 
     The bridge reads this doc on every button tap. One doc per session;
     the doc is overwritten when a new pause fires (only one interrupt is
-    pending per session at a time — see §7.3.2 + §6.9.1)."""
+    pending per session at a time — see §7.3.2 + §6.9.1).
+
+    `user_id` is required because Vertex's session service enforces
+    per-user ownership — `engine.stream_query(user_id=...)` rejects
+    requests where the session doesn't belong to that user. The bridge
+    uses this field to resume sessions originally created by the
+    scheduler ("scheduler") or smoke tests ("smoke-test-N")."""
     prefix = session_id[:SESSION_PREFIX_LENGTH]
     now = datetime.now(timezone.utc)
     doc_ref = (
@@ -116,6 +125,7 @@ def _write_session_lookup(session_id: str, interrupt_id: str) -> None:
         {
             "session_id_full":   session_id,
             "interrupt_id_full": interrupt_id,
+            "user_id":           user_id,
             "created_at":        now,
             "expires_at":        now + timedelta(days=SESSION_TTL_DAYS),
             "terminated":        False,
@@ -154,18 +164,19 @@ def post_topic_approval(
     chosen: dict,
     session_id: str,
     interrupt_id: str,
+    user_id: str,
 ) -> dict:
     """Post Topic Gate Telegram message with 2 buttons (Approve / Skip).
 
     Side effects:
-      1. Writes session-lookup doc to Firestore.
+      1. Writes session-lookup doc to Firestore (including `user_id`).
       2. POSTs sendMessage to Telegram.
 
     Returns the Telegram API response. Raises on Telegram or Firestore
     error (per §12.2 decision 1: no retry in v2).
     """
     chat_id = _required_env("TELEGRAM_APPROVAL_CHAT_ID")
-    _write_session_lookup(session_id, interrupt_id)
+    _write_session_lookup(session_id, interrupt_id, user_id)
 
     text = _format_topic_message(chosen)
     keyboard = _two_button_keyboard(
@@ -213,24 +224,30 @@ def post_editor_review(
     repo_url: Optional[str],
     session_id: str,
     interrupt_id: str,
+    user_id: str,
 ) -> dict:
-    """Post Editor Telegram message with 3 buttons (Approve / Reject / Revise).
+    """Post Editor Telegram review as a .md document attachment + caption.
+
+    Sends the FULL draft markdown as a downloadable file (so the operator
+    can read the whole thing in Telegram's preview) with a short HTML
+    caption summarizing the release + asset counts, plus the 3-button
+    inline keyboard (Approve / Revise / Reject).
 
     On Revise tap, the bridge handles the ForceReply follow-up
     separately — this function ONLY posts the initial review message.
 
-    Side effects same as ``post_topic_approval``. Returns the Telegram
-    API response.
+    Side effects: writes Firestore session-lookup doc, then POSTs
+    sendDocument to Telegram. Returns the Telegram API response.
     """
     chat_id = _required_env("TELEGRAM_APPROVAL_CHAT_ID")
-    _write_session_lookup(session_id, interrupt_id)
+    _write_session_lookup(session_id, interrupt_id, user_id)
 
-    text = _format_editor_message(
+    caption = _format_editor_caption(
         chosen=chosen,
-        draft_preview=draft_preview,
         image_count=len(image_urls),
         video_url=video_url,
         repo_url=repo_url,
+        draft_chars=len(draft_preview or ""),
     )
     keyboard = _three_button_keyboard(
         session_id=session_id,
@@ -241,40 +258,75 @@ def post_editor_review(
             ("❌ Reject",  "reject"),
         ],
     )
-    payload = {
-        "chat_id":    chat_id,
-        "text":       text,
-        "parse_mode": "HTML",
-        "reply_markup": {"inline_keyboard": keyboard},
-        "disable_web_page_preview": True,
+    title_slug = _slugify(str(chosen.get("title", "draft"))) or "draft"
+    filename = f"{title_slug}-draft.md"
+    document_bytes = (draft_preview or "(empty draft)").encode("utf-8")
+    return _telegram_send_document(
+        chat_id=chat_id,
+        filename=filename,
+        document_bytes=document_bytes,
+        caption=caption,
+        reply_markup={"inline_keyboard": keyboard},
+    )
+
+
+def _slugify(s: str) -> str:
+    """ASCII slug for filenames — letters/digits/hyphens only, max 50 chars."""
+    import re as _re
+    cleaned = _re.sub(r"[^A-Za-z0-9]+", "-", s).strip("-").lower()
+    return cleaned[:50]
+
+
+def _telegram_send_document(
+    chat_id: str,
+    filename: str,
+    document_bytes: bytes,
+    caption: str,
+    reply_markup: dict,
+) -> dict:
+    """Multipart sendDocument with caption + inline keyboard."""
+    import json as _json
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN env var is required")
+    url = TELEGRAM_API_BASE.format(token=token) + "/sendDocument"
+    files = {"document": (filename, document_bytes, "text/markdown")}
+    data = {
+        "chat_id":      chat_id,
+        "caption":      caption[:1024],  # Telegram caption limit
+        "parse_mode":   "HTML",
+        "reply_markup": _json.dumps(reply_markup),
     }
-    return _telegram_post("sendMessage", payload)
+    response = requests.post(url, files=files, data=data, timeout=HTTP_TIMEOUT_SECONDS)
+    response.raise_for_status()
+    return response.json()
 
 
-def _format_editor_message(
+def _format_editor_caption(
     chosen: dict,
-    draft_preview: str,
     image_count: int,
     video_url: Optional[str],
     repo_url: Optional[str],
+    draft_chars: int,
 ) -> str:
-    """HTML-escaped Telegram message body for Editor. ≤4096 chars."""
+    """HTML-formatted caption for the Editor sendDocument call. The full
+    draft is the attached .md file; this caption is a short header."""
     title = html_escape(str(chosen.get("title", "(no title)")))
+    source = html_escape(str(chosen.get("source", "?")))
     lines = [
         f"<b>{title}</b> — Editor review",
-        f"Images: {image_count}",
+        f"<i>Source: {source}  •  Draft: {draft_chars} chars  •  Images: {image_count}</i>",
     ]
     if video_url:
         lines.append(f"Video: {html_escape(video_url)}")
     if repo_url:
         lines.append(f"Repo: {html_escape(repo_url)}")
-    truncated_preview = (draft_preview or "")[:DRAFT_PREVIEW_MAX_CHARS]
-    body = (
-        "\n".join(lines)
-        + "\n\n"
-        + f"<pre>{html_escape(truncated_preview)}</pre>"
+    lines.append("")
+    lines.append(
+        "Open the attached <code>.md</code> file to read the full draft, "
+        "then tap <b>Approve</b>, <b>Revise</b>, or <b>Reject</b>."
     )
-    return body[:4000]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

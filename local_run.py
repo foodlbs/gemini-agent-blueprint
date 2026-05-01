@@ -53,7 +53,7 @@ def install_mocks() -> None:
     # 1. Telegram: replace post helpers with logging stubs.
     from tools import telegram
 
-    def fake_post_topic_approval(chosen, session_id, interrupt_id):
+    def fake_post_topic_approval(chosen, session_id, interrupt_id, user_id):
         log.info("=" * 60)
         log.info("[MOCK TELEGRAM] post_topic_approval would post:")
         log.info("  title:        %r", chosen.get("title"))
@@ -69,7 +69,8 @@ def install_mocks() -> None:
         return {"ok": True}
 
     def fake_post_editor_review(chosen, draft_preview, image_urls,
-                                video_url, repo_url, session_id, interrupt_id):
+                                video_url, repo_url, session_id, interrupt_id,
+                                user_id):
         log.info("=" * 60)
         log.info("[MOCK TELEGRAM] post_editor_review would post:")
         log.info("  title:         %r", chosen.get("title"))

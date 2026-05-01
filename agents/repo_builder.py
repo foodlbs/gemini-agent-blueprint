@@ -12,8 +12,8 @@ from tools.github_ops import (
 
 repo_builder = Agent(
     name="repo_builder",
-    model="gemini-3.1-flash-lite-preview",
+    model="gemini-2.5-flash-lite",
     instruction=REPO_BUILDER_INSTRUCTION,
     tools=[github_create_repo, github_commit_files, github_set_topics],
-    output_key="starter_repo",
+    output_key="starter_repo_raw",
 )

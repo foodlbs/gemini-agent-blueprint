@@ -175,15 +175,26 @@ class PipelineState(BaseModel):
     """The one candidate Triage picked, OR None if Triage skipped."""
     skip_reason: Optional[str] = None
     """Set when chosen_release is None. Free-text explanation."""
+    chosen_release_write_count: int = 0
+    """Counter for the sticky-key first-write-wins policy in
+    `tools/state_helpers.write_state_json`. Triage's flash/flash-lite
+    LLM tends to re-evaluate and re-write its decision 4-10 times,
+    sometimes flipping a real candidate back to null. After the first
+    write, subsequent writes return ok=True without changing state."""
 
     # --- Topic Gate (HITL #1) ------------------------------------------------
     topic_verdict: Optional[TopicVerdict] = None
     """The human's response to the topic-approval Telegram post."""
 
     # --- Researcher pool -----------------------------------------------------
-    docs_research: Optional[ResearchDossier] = None
-    github_research: Optional[ResearchDossier] = None
-    context_research: Optional[ResearchDossier] = None
+    # Each researcher's LlmAgent uses output_key=<field>, which stores
+    # the model's raw text response. ADK does not auto-parse JSON, so
+    # these are plain strings until `gather_research` (a function node)
+    # parses + validates and merges them into the typed `research`
+    # field. Same pattern as scout_raw / architect_raw / critic_raw.
+    docs_research: Optional[str] = None
+    github_research: Optional[str] = None
+    context_research: Optional[str] = None
     research: Optional[ResearchDossier] = None
     """Merged dossier produced by gather_research from the three above."""
 
@@ -197,18 +208,34 @@ class PipelineState(BaseModel):
     needs_repo: bool = False
 
     # --- Writer loop ---------------------------------------------------------
-    draft: Optional[Draft] = None
-    """Current draft being iterated. Drafter writes; Critic annotates."""
+    # `drafter`'s LlmAgent uses output_key="draft", which stores its raw
+    # text (markdown) here. The composite Draft model that wrapped
+    # markdown + verdict + iteration is split into top-level fields so
+    # ADK's string-only output_key writes don't fail Pydantic validation.
+    draft: Optional[str] = None
+    """Current draft markdown — pure text written by `drafter` via output_key."""
     critic_raw: Optional[str] = None
     """Raw JSON verdict from critic_llm. Parsed by `critic_split`."""
+    critic_verdict: Optional[CriticVerdict] = None
+    """`accept` or `revise` — set by `critic_split`."""
+    critic_feedback: Optional[str] = None
+    """Free-text feedback from the critic — set by `critic_split`."""
     writer_iterations: int = 0
     """Hard cap counter — route_critic_verdict forces ACCEPT once this hits 3."""
 
-    # --- Asset agent ---------------------------------------------------------
+    # --- Asset stage ---------------------------------------------------------
+    # `nodes/image_assets.image_asset_node` is a function node — it
+    # iterates `image_briefs`, calls Imagen + GCS directly, and writes
+    # the typed list here. The previous LlmAgent implementation blew
+    # past the 1M-token context cap on the second call because Imagen
+    # PNG bytes accumulated in the model history.
     image_assets: list[ImageAsset] = Field(default_factory=list)
     video_asset: Optional[VideoAsset] = None
 
     # --- Repo Builder (conditional) -----------------------------------------
+    # Same pattern: `repo_builder` writes raw text; downstream consumers
+    # (editor_request, publisher) parse `starter_repo_raw` on read.
+    starter_repo_raw: Optional[str] = None
     starter_repo: Optional[StarterRepo] = None
 
     # --- Editor (HITL #2) + Revision Writer loop ----------------------------

@@ -35,6 +35,24 @@ _STRING_FALLBACK_KEYS = frozenset({
     "skip_reason",
 })
 
+# Keys that follow first-write-wins semantics: once write_state_json
+# has been called for one of these keys, subsequent calls return
+# ok=True without changing state. Tracked via a hidden counter
+# `_<key>_write_count` so that null and non-null first writes both lock.
+#
+# This stops Triage's known LLM looping behavior — flash/flash-lite
+# often re-evaluates and re-writes its decision 4-10 times, sometimes
+# transitioning from a valid candidate back to null mid-loop. The
+# first decision is the one that downstream nodes route on; later
+# writes only waste tokens.
+# Map from sticky key to its companion counter field on PipelineState.
+# Underscore-prefixed names cannot be used because Pydantic v2 treats
+# them as private attributes (see Bug 2 in the v2 fixes log).
+_STICKY_COUNTER_FIELDS: dict[str, str] = {
+    "chosen_release": "chosen_release_write_count",
+}
+_STICKY_KEYS = frozenset(_STICKY_COUNTER_FIELDS)
+
 
 def write_state_json(
     key: str,
@@ -59,7 +77,34 @@ def write_state_json(
         ``{"ok": True, "key": <key>}`` on success, or
         ``{"ok": False, "error": <message>}`` if ``value_json`` is not
         valid JSON AND the key is not in the string-fallback allowlist.
+        For sticky keys (``chosen_release``) that already hold a non-null
+        value, returns ``{"ok": True, "key": <key>, "skipped": "sticky"}``
+        without modifying state.
     """
+    if key in _STICKY_KEYS:
+        ck = _STICKY_COUNTER_FIELDS[key]
+        prior_count = int(tool_context.state.get(ck, 0))
+        if prior_count >= 1:
+            logger.info(
+                "write_state_json: %s already written %d time(s); skipping "
+                "(sticky-key first-write-wins policy)", key, prior_count,
+            )
+            # Return ok=False with a clear directive — the LLM treats
+            # this as an error and (with the right instruction) stops
+            # making more tool calls. ok=True with skipped=sticky is
+            # too soft — flash/flash-lite ignore the success and keep
+            # looping, stalling the workflow indefinitely.
+            return {
+                "ok": False,
+                "key": key,
+                "error": (
+                    f"DECISION_ALREADY_FINALIZED: state['{key}'] was "
+                    f"written {prior_count} time(s) earlier this turn. "
+                    f"The decision is final and cannot be changed. "
+                    f"Stop calling tools and end your response now."
+                ),
+            }
+
     try:
         parsed = json.loads(value_json) if value_json else None
     except json.JSONDecodeError as e:
@@ -73,4 +118,7 @@ def write_state_json(
         logger.warning("write_state_json invalid JSON for %s: %s", key, e)
         return {"ok": False, "error": f"Invalid JSON: {e}"}
     tool_context.state[key] = parsed
+    if key in _STICKY_KEYS:
+        ck = _STICKY_COUNTER_FIELDS[key]
+        tool_context.state[ck] = int(tool_context.state.get(ck, 0)) + 1
     return {"ok": True, "key": key}

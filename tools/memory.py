@@ -60,18 +60,29 @@ def _build_service() -> BaseMemoryService:
     if backend == "inmemory":
         return InMemoryMemoryService()
     if backend == "vertex":
-        memory_bank_id = os.environ.get("MEMORY_BANK_ID")
-        if not memory_bank_id:
+        # Memory Bank in ADK 2.0 is attached to the ReasoningEngine
+        # itself — there is no separate "memory bank" resource. The
+        # service routes API calls to /reasoningEngines/{id}/memories.
+        # Inside Agent Runtime, GOOGLE_CLOUD_AGENT_ENGINE_ID is auto-set;
+        # locally, the operator sets it to the deployed engine's ID for
+        # staging tests (`MEMORY_BANK_BACKEND=inmemory` for unit tests).
+        agent_engine_id = os.environ.get("GOOGLE_CLOUD_AGENT_ENGINE_ID")
+        if not agent_engine_id:
             raise RuntimeError(
-                "MEMORY_BANK_ID must be set when MEMORY_BANK_BACKEND=vertex. "
-                "For tests / local dev, export MEMORY_BANK_BACKEND=inmemory."
+                "GOOGLE_CLOUD_AGENT_ENGINE_ID must be set when "
+                "MEMORY_BANK_BACKEND=vertex. Auto-set inside Agent Runtime; "
+                "for tests use MEMORY_BANK_BACKEND=inmemory."
             )
-        # Construction signature varies across ADK 2.0 betas — try the
-        # documented kwargs in order. Older betas: positional resource path.
-        try:
-            return VertexAiMemoryBankService(memory_bank_id=memory_bank_id)
-        except TypeError:
-            return VertexAiMemoryBankService(memory_bank_id)
+        # Accept either a bare ID ('456') or a full resource path
+        # ('projects/.../reasoningEngines/456') — strip to the bare ID
+        # because that's what the constructor expects.
+        if "/" in agent_engine_id:
+            agent_engine_id = agent_engine_id.split("/")[-1]
+        return VertexAiMemoryBankService(
+            project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
+            location=os.environ.get("GOOGLE_CLOUD_LOCATION"),
+            agent_engine_id=agent_engine_id,
+        )
     raise ValueError(f"Unknown MEMORY_BANK_BACKEND: {backend!r}")
 
 

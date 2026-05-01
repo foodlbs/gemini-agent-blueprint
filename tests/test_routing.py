@@ -80,7 +80,7 @@ def test_route_topic_verdict_timeout():
 
 def test_route_critic_verdict_REVISE_when_critic_says_revise_below_cap():
     ctx = _ctx({
-        "draft": SimpleNamespace(critic_verdict="revise"),
+        "critic_verdict": "revise",
         "writer_iterations": 1,
     })
     event = route_critic_verdict(None, ctx)
@@ -90,7 +90,7 @@ def test_route_critic_verdict_REVISE_when_critic_says_revise_below_cap():
 
 def test_route_critic_verdict_ACCEPT_when_critic_says_accept_below_cap():
     ctx = _ctx({
-        "draft": SimpleNamespace(critic_verdict="accept"),
+        "critic_verdict": "accept",
         "writer_iterations": 1,
     })
     event = route_critic_verdict(None, ctx)
@@ -101,7 +101,7 @@ def test_route_critic_verdict_ACCEPT_when_critic_says_accept_below_cap():
 def test_route_critic_verdict_FORCES_ACCEPT_at_cap_even_if_revise():
     """Bug-prevention: infinite writer loop is impossible."""
     ctx = _ctx({
-        "draft": SimpleNamespace(critic_verdict="revise"),
+        "critic_verdict": "revise",
         "writer_iterations": MAX_WRITER_ITERATIONS,
     })
     event = route_critic_verdict(None, ctx)
@@ -113,7 +113,7 @@ def test_route_critic_verdict_FORCES_ACCEPT_at_cap_even_if_revise():
 def test_route_critic_verdict_forces_ACCEPT_above_cap_too():
     """Defensive — should never reach iteration > cap, but test confirms."""
     ctx = _ctx({
-        "draft": SimpleNamespace(critic_verdict="revise"),
+        "critic_verdict": "revise",
         "writer_iterations": MAX_WRITER_ITERATIONS + 5,
     })
     event = route_critic_verdict(None, ctx)

@@ -6,9 +6,9 @@ Two modes:
     runs offline against `InMemoryMemoryService`. Always available.
     No GCP dependencies.
 
-  - **vertex** (MEMORY_BANK_BACKEND=vertex + MEMORY_BANK_ID=...):
-    hits the real managed Vertex Memory Bank. Validates the live
-    round-trip — what production will rely on.
+  - **vertex** (MEMORY_BANK_BACKEND=vertex + GOOGLE_CLOUD_AGENT_ENGINE_ID=...):
+    hits the real managed Vertex Memory Bank attached to the deployed
+    ReasoningEngine. Validates the live round-trip.
 
 Exit code 0 = round-trip succeeded. 1 = unexpected result count or
 metadata round-trip failure.
@@ -18,9 +18,11 @@ Run::
     # Default offline (inmemory):
     PYTHONPATH=. uv run python tests/smoke/memory_smoke.py
 
-    # Live Vertex Memory Bank:
+    # Live Vertex Memory Bank (against a deployed engine):
     MEMORY_BANK_BACKEND=vertex \\
-    MEMORY_BANK_ID=projects/.../locations/us-west1/memoryBanks/... \\
+    GOOGLE_CLOUD_AGENT_ENGINE_ID=$(cat deploy/.deployed_resource_id | awk -F/ '{print $NF}') \\
+    GOOGLE_CLOUD_PROJECT=gen-lang-client-0366435980 \\
+    GOOGLE_CLOUD_LOCATION=us-west1 \\
     PYTHONPATH=. uv run python tests/smoke/memory_smoke.py
 """
 
@@ -47,8 +49,9 @@ from tools.memory import (  # noqa: E402
 def main() -> int:
     backend = os.environ["MEMORY_BANK_BACKEND"]
     print(f"Backend: {backend}")
-    if backend == "vertex" and not os.environ.get("MEMORY_BANK_ID"):
-        print("SKIP: MEMORY_BANK_BACKEND=vertex but MEMORY_BANK_ID not set.")
+    if backend == "vertex" and not os.environ.get("GOOGLE_CLOUD_AGENT_ENGINE_ID"):
+        print("SKIP: MEMORY_BANK_BACKEND=vertex but "
+              "GOOGLE_CLOUD_AGENT_ENGINE_ID not set.")
         return 0
 
     reset_default_service(None)

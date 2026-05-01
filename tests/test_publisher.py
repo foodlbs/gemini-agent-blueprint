@@ -46,7 +46,7 @@ def test_replaces_image_markers_with_url_keyed_by_position():
     md = "# Title\n<!--IMG:hero-->\n## Section 1\nBody\n<!--IMG:section_1-->\nMore body"
     ctx = _ctx({
         "chosen_release": _chosen(),
-        "draft": Draft(markdown=md),
+        "draft": md,
         "image_assets": [_img("hero"), _img("section_1")],
     })
     with patch("nodes.publisher.upload_to_gcs", return_value="https://gcs/bundle.json"), \
@@ -66,7 +66,7 @@ def test_drops_image_marker_for_position_without_asset(caplog):
     md = "# Title\n<!--IMG:hero-->\n<!--IMG:section_99-->"  # section_99 has no asset
     ctx = _ctx({
         "chosen_release": _chosen(),
-        "draft": Draft(markdown=md),
+        "draft": md,
         "image_assets": [_img("hero")],  # only hero
     })
     with patch("nodes.publisher.upload_to_gcs", return_value="https://gcs/bundle.json"), \
@@ -91,7 +91,7 @@ def test_video_marker_becomes_gif_plus_mp4_link_when_video_present():
     )
     ctx = _ctx({
         "chosen_release": _chosen(),
-        "draft": Draft(markdown=md),
+        "draft": md,
         "image_assets": [_img("hero")],
         "video_asset": video,
     })
@@ -108,7 +108,7 @@ def test_video_marker_dropped_when_video_asset_none():
     md = "# Title\n<!--IMG:hero-->\n<!--VID:hero-->"
     ctx = _ctx({
         "chosen_release": _chosen(),
-        "draft": Draft(markdown=md),
+        "draft": md,
         "image_assets": [_img("hero")],
         "video_asset": None,
     })
@@ -124,7 +124,7 @@ def test_video_marker_dropped_when_video_asset_none():
 def test_bundle_uploaded_to_gcs_with_correct_slug():
     ctx = _ctx({
         "chosen_release": _chosen(),
-        "draft": Draft(markdown="# T\n<!--IMG:hero-->"),
+        "draft": "# T\n<!--IMG:hero-->",
         "image_assets": [_img("hero")],
     })
     with patch("nodes.publisher.upload_to_gcs", return_value="https://gcs/bundle.json") as mock_upload, \
@@ -139,7 +139,7 @@ def test_bundle_uploaded_to_gcs_with_correct_slug():
 def test_memory_bank_covered_fact_written_with_correct_metadata():
     ctx = _ctx({
         "chosen_release": _chosen(),
-        "draft": Draft(markdown="# T\n<!--IMG:hero-->"),
+        "draft": "# T\n<!--IMG:hero-->",
         "image_assets": [_img("hero")],
         "starter_repo": StarterRepo(url="https://github.com/o/r", files_committed=[], sha="abc"),
     })
@@ -162,7 +162,7 @@ def test_memory_bank_failure_does_not_fail_cycle():
     published, memory_bank_recorded=False, cycle still ends 'published'."""
     ctx = _ctx({
         "chosen_release": _chosen(),
-        "draft": Draft(markdown="# T\n<!--IMG:hero-->"),
+        "draft": "# T\n<!--IMG:hero-->",
         "image_assets": [_img("hero")],
     })
     with patch("nodes.publisher.upload_to_gcs", return_value="https://gcs/bundle.json"), \
@@ -176,7 +176,7 @@ def test_memory_bank_failure_does_not_fail_cycle():
 def test_cycle_outcome_set_to_published():
     ctx = _ctx({
         "chosen_release": _chosen(),
-        "draft": Draft(markdown="# T\n<!--IMG:hero-->"),
+        "draft": "# T\n<!--IMG:hero-->",
         "image_assets": [_img("hero")],
     })
     with patch("nodes.publisher.upload_to_gcs", return_value="https://gcs/bundle.json"), \

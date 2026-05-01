@@ -198,3 +198,8 @@ my_env.tfvars
 
 # A2A Inspector
 tools/a2a-inspector/
+
+# Per-developer Agent Runtime resource ID — DESIGN.v2.md §10.1.
+# Not committed because each developer/staging may deploy to their
+# own ReasoningEngine.
+deploy/.deployed_resource_id

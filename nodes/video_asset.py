@@ -46,7 +46,7 @@ def video_asset_or_skip(node_input, ctx: Context) -> Event:
         return Event(output={"skipped": True, "reason": f"veo_error: {e}"})
 
     mp4_url = upload_to_gcs(
-        payload=mp4_bytes,
+        bytes_data=mp4_bytes,
         slug=f"{cycle_id}/video.mp4",
         content_type="video/mp4",
     )

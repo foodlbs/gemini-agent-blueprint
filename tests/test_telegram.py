@@ -105,8 +105,7 @@ def test_post_topic_approval_writes_firestore_lookup_first(mock_firestore, chose
         post_topic_approval(
             chosen=chosen,
             session_id="abcdef0123-full-session-id",
-            interrupt_id="topic-gate-abcdef123456",
-        )
+            interrupt_id="topic-gate-abcdef123456", user_id="test-user")
 
     # Firestore was called with the 8-char prefix as the doc id
     args, _ = mock_firestore.set.call_args
@@ -123,8 +122,7 @@ def test_post_topic_approval_calls_telegram_with_two_button_keyboard(mock_firest
         post_topic_approval(
             chosen=chosen,
             session_id="sess1234567890",
-            interrupt_id="topic-gate-xyz",
-        )
+            interrupt_id="topic-gate-xyz", user_id="test-user")
 
     assert mock_requests.post.call_count == 1
     call = mock_requests.post.call_args
@@ -145,8 +143,7 @@ def test_post_topic_approval_message_contains_required_fields(mock_firestore, ch
         mock_requests.post.return_value.json.return_value = {"ok": True}
         mock_requests.post.return_value.raise_for_status.return_value = None
         post_topic_approval(
-            chosen=chosen, session_id="s", interrupt_id="i",
-        )
+            chosen=chosen, session_id="s", interrupt_id="i", user_id="test-user")
     text = mock_requests.post.call_args.kwargs["json"]["text"]
     assert chosen["title"] in text
     assert chosen["url"]   in text
@@ -163,7 +160,7 @@ def test_post_topic_approval_html_escapes_user_content(mock_firestore):
         mock_requests.post.return_value.raise_for_status.return_value = None
         post_topic_approval(
             chosen={"title": "<script>alert(1)</script>", "url": "https://x", "source": "arxiv", "score": 80},
-            session_id="s", interrupt_id="i",
+            session_id="s", interrupt_id="i", user_id="test-user",
         )
     text = mock_requests.post.call_args.kwargs["json"]["text"]
     assert "<script>" not in text
@@ -178,8 +175,7 @@ def test_post_topic_approval_callback_data_under_cap_for_long_url(mock_firestore
         post_topic_approval(
             chosen={"title": "T", "url": long_url, "source": "arxiv", "score": 80},
             session_id="abcdef01-session-uuid-rest",
-            interrupt_id="topic-gate-" + "y" * 100,
-        )
+            interrupt_id="topic-gate-" + "y" * 100, user_id="test-user")
     keyboard = mock_requests.post.call_args.kwargs["json"]["reply_markup"]["inline_keyboard"]
     for row in keyboard:
         for btn in row:
@@ -189,13 +185,13 @@ def test_post_topic_approval_callback_data_under_cap_for_long_url(mock_firestore
 def test_post_topic_approval_raises_when_bot_token_missing(monkeypatch, mock_firestore, chosen):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN")
     with pytest.raises(RuntimeError, match="TELEGRAM_BOT_TOKEN"):
-        post_topic_approval(chosen=chosen, session_id="s", interrupt_id="i")
+        post_topic_approval(chosen=chosen, session_id="s", interrupt_id="i", user_id="test-user")
 
 
 def test_post_topic_approval_raises_when_chat_id_missing(monkeypatch, mock_firestore, chosen):
     monkeypatch.delenv("TELEGRAM_APPROVAL_CHAT_ID")
     with pytest.raises(RuntimeError, match="TELEGRAM_APPROVAL_CHAT_ID"):
-        post_topic_approval(chosen=chosen, session_id="s", interrupt_id="i")
+        post_topic_approval(chosen=chosen, session_id="s", interrupt_id="i", user_id="test-user")
 
 
 # ---------------------------------------------------------------------------
@@ -213,11 +209,22 @@ def test_post_editor_review_writes_firestore_lookup(mock_firestore, chosen):
             image_urls=["https://example.com/img1.png"],
             video_url=None, repo_url=None,
             session_id="abcdef0123-full-uuid",
-            interrupt_id="editor-abcdef01-0",
-        )
+            interrupt_id="editor-abcdef01-0", user_id="test-user")
     args, _ = mock_firestore.set.call_args
     assert args[0]["session_id_full"]   == "abcdef0123-full-uuid"
     assert args[0]["interrupt_id_full"] == "editor-abcdef01-0"
+
+
+def _editor_call_payload(mock_requests):
+    """post_editor_review now uses sendDocument (multipart). Extract the
+    decoded reply_markup + caption from the call's `data` kwarg."""
+    import json as _json
+    data = mock_requests.post.call_args.kwargs["data"]
+    return {
+        "caption":      data["caption"],
+        "reply_markup": _json.loads(data["reply_markup"]),
+        "files":        mock_requests.post.call_args.kwargs.get("files", {}),
+    }
 
 
 def test_post_editor_review_three_button_keyboard(mock_firestore, chosen):
@@ -228,9 +235,9 @@ def test_post_editor_review_three_button_keyboard(mock_firestore, chosen):
             chosen=chosen,
             draft_preview="hello", image_urls=[],
             video_url=None, repo_url=None,
-            session_id="s", interrupt_id="i",
-        )
-    keyboard = mock_requests.post.call_args.kwargs["json"]["reply_markup"]["inline_keyboard"]
+            session_id="s", interrupt_id="i", user_id="test-user")
+    payload = _editor_call_payload(mock_requests)
+    keyboard = payload["reply_markup"]["inline_keyboard"]
     flat = [btn for row in keyboard for btn in row]
     assert len(flat) == 3
     labels = [btn["text"] for btn in flat]
@@ -247,11 +254,10 @@ def test_post_editor_review_omits_video_line_when_none(mock_firestore, chosen):
             chosen=chosen,
             draft_preview="x", image_urls=["https://example.com/i.png"],
             video_url=None, repo_url="https://github.com/o/r",
-            session_id="s", interrupt_id="i",
-        )
-    text = mock_requests.post.call_args.kwargs["json"]["text"]
-    assert "Video:" not in text
-    assert "Repo:"  in text
+            session_id="s", interrupt_id="i", user_id="test-user")
+    caption = _editor_call_payload(mock_requests)["caption"]
+    assert "Video:" not in caption
+    assert "Repo:"  in caption
 
 
 def test_post_editor_review_omits_repo_line_when_none(mock_firestore, chosen):
@@ -262,15 +268,16 @@ def test_post_editor_review_omits_repo_line_when_none(mock_firestore, chosen):
             chosen=chosen,
             draft_preview="x", image_urls=[],
             video_url="https://example.com/v.mp4", repo_url=None,
-            session_id="s", interrupt_id="i",
-        )
-    text = mock_requests.post.call_args.kwargs["json"]["text"]
-    assert "Video:" in text
-    assert "Repo:"  not in text
+            session_id="s", interrupt_id="i", user_id="test-user")
+    caption = _editor_call_payload(mock_requests)["caption"]
+    assert "Video:" in caption
+    assert "Repo:"  not in caption
 
 
-def test_post_editor_review_truncates_draft_preview(mock_firestore, chosen):
-    long_preview = "x" * 5000  # ≫ 500-char cap
+def test_post_editor_review_attaches_full_draft_as_md_document(mock_firestore, chosen):
+    """The full draft is now sent as a downloadable .md file — no
+    truncation. The caption is short."""
+    long_preview = "x" * 5000
     with patch("tools.telegram.requests") as mock_requests:
         mock_requests.post.return_value.json.return_value = {"ok": True}
         mock_requests.post.return_value.raise_for_status.return_value = None
@@ -278,14 +285,16 @@ def test_post_editor_review_truncates_draft_preview(mock_firestore, chosen):
             chosen=chosen,
             draft_preview=long_preview, image_urls=[],
             video_url=None, repo_url=None,
-            session_id="s", interrupt_id="i",
-        )
-    text = mock_requests.post.call_args.kwargs["json"]["text"]
-    # Total message ≤4000 chars, preview portion ≤ DRAFT_PREVIEW_MAX_CHARS.
-    assert len(text) <= 4000
-    # The actual preview content (the 'x' run) must be truncated.
-    x_run = max((len(s) for s in text.split() if set(s) == {"x"}), default=0)
-    assert x_run <= DRAFT_PREVIEW_MAX_CHARS
+            session_id="s", interrupt_id="i", user_id="test-user")
+    payload = _editor_call_payload(mock_requests)
+    # The full draft bytes are in the multipart 'document' tuple.
+    filename, content_bytes, mime = payload["files"]["document"]
+    assert filename.endswith(".md")
+    assert mime == "text/markdown"
+    assert len(content_bytes) == 5000
+    # Caption is short (Telegram's 1024-char limit) and references the file.
+    assert len(payload["caption"]) <= 1024
+    assert "Editor review" in payload["caption"]
 
 
 def test_post_editor_review_callback_data_includes_iteration_in_interrupt(mock_firestore, chosen):
@@ -298,9 +307,8 @@ def test_post_editor_review_callback_data_includes_iteration_in_interrupt(mock_f
             chosen=chosen,
             draft_preview="x", image_urls=[],
             video_url=None, repo_url=None,
-            session_id="s", interrupt_id="editor-abc12345-2",
-        )
-    keyboard = mock_requests.post.call_args.kwargs["json"]["reply_markup"]["inline_keyboard"]
+            session_id="s", interrupt_id="editor-abc12345-2", user_id="test-user")
+    keyboard = _editor_call_payload(mock_requests)["reply_markup"]["inline_keyboard"]
     flat = [btn for row in keyboard for btn in row]
     for btn in flat:
         # Iteration suffix must survive the 30-char prefix truncation.
@@ -318,7 +326,7 @@ def test_post_topic_approval_propagates_telegram_5xx(mock_firestore, chosen):
             __import__("requests").HTTPError("503 Service Unavailable")
         )
         with pytest.raises(__import__("requests").HTTPError):
-            post_topic_approval(chosen=chosen, session_id="s", interrupt_id="i")
+            post_topic_approval(chosen=chosen, session_id="s", interrupt_id="i", user_id="test-user")
 
 
 def test_post_topic_approval_propagates_firestore_error(chosen):
@@ -332,7 +340,7 @@ def test_post_topic_approval_propagates_firestore_error(chosen):
     try:
         with patch("tools.telegram.requests") as mock_requests:
             with pytest.raises(RuntimeError, match="firestore unavailable"):
-                post_topic_approval(chosen=chosen, session_id="s", interrupt_id="i")
+                post_topic_approval(chosen=chosen, session_id="s", interrupt_id="i", user_id="test-user")
             # Telegram MUST NOT be called if Firestore failed first.
             assert mock_requests.post.call_count == 0
     finally:

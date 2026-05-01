@@ -10,7 +10,7 @@ from shared.prompts import REVISION_WRITER_INSTRUCTION
 
 revision_writer = Agent(
     name="revision_writer",
-    model="gemini-3.1-pro-preview",
+    model="gemini-2.5-pro",
     instruction=REVISION_WRITER_INSTRUCTION,
     output_key="draft",
 )

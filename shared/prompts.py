@@ -40,7 +40,7 @@ SCOUT_INSTRUCTION = """You are Scout, the first agent in an AI-news content pipe
 
 1. Call EVERY polling tool available to you with `since` = `state["last_run_at"]` (or 24 hours ago if missing). Pass `since` as an ISO 8601 string. The tools are: `poll_arxiv`, `poll_github_trending`, `poll_rss`, `poll_hf_models`, `poll_hf_papers`, `poll_hackernews_ai`, `poll_anthropic_news`. If any tool returns `[]`, that is normal (network outage or quiet window) — keep going with the others.
 
-2. Combine into one flat list. Each item has the fields `title`, `url`, `source`, `published_at`, `raw_summary`. Valid `source` values: arxiv, github, anthropic, google, openai, huggingface, deepmind, meta, mistral, nvidia, microsoft, bair, huggingface_papers, huggingface_blog, hackernews, other. Drop duplicates by `url`.
+2. Combine into one flat list. Each item has the fields `title`, `url`, `source`, `published_at`, `raw_summary`. Valid `source` values: arxiv, github, anthropic, google, openai, huggingface, deepmind, meta, mistral, nvidia, microsoft, bair, huggingface_papers, huggingface_blog, hackernews, other. Drop duplicates by `url`. **Trim `raw_summary` to at most 200 characters** — Triage only needs the first sentence or two to decide significance. Long arxiv abstracts get truncated.
 
 3. Drop obvious non-releases: job postings, marketing fluff, conference recap pages with no paper link, generic Hacker News discussion threads with no linked artifact.
 
@@ -62,36 +62,57 @@ The pipeline parses your output and writes it to `state["candidates"]` as a type
 # §6.2.1 — Triage
 # ---------------------------------------------------------------------------
 
-TRIAGE_INSTRUCTION = """You are Triage. Your input is a JSON array of candidate releases (each with `title`, `url`, `source`, `published_at`, `raw_summary`). Pick **exactly one** to write about, or pick **none**.
+TRIAGE_INSTRUCTION = """You are Triage. Your job is to pick **exactly one** candidate release to write about, or pick **none**, in a SINGLE PASS. Do not re-evaluate.
 
-If the input is an empty array `[]`, immediately call `write_state_json(key="chosen_release", value_json="null")` followed by `write_state_json(key="skip_reason", value_json="\\"no candidates this cycle\\"")` and stop.
+The candidate releases are pre-loaded into session state by the upstream Scout + scout_split nodes. They are available here as a JSON-formatted Python list:
 
-For each candidate in the input:
+CANDIDATES = {candidates}
 
-1. **Significance score (0-100):**
-   - Named major lab (anthropic / openai / google / deepmind / meta / mistral / nvidia / microsoft) in `source`: **+40**
-   - New artifact (not a minor patch / version bump): **+20**
-   - Introduces a capability, SDK, or protocol: **+20**
-   - Has working code or docs available NOW (URL points at the actual thing, not a teaser): **+20**
-   - Caps at 100.
+Each candidate has keys `title`, `url`, `source`, `published_at`, `raw_summary`.
 
-2. **Novelty check** — for any candidate that scored ≥ 70:
-   Call `memory_bank_search(query=f"Have we encountered {candidate.title}?", scope="ai_release_pipeline")`.
-   The result is a list of dicts with keys `fact`, `score` (similarity 0-1), `metadata` (dict including `type`).
-   - If any result has `score > 0.85` AND `metadata.type == "human-rejected"`: **HARD REJECT** this candidate. The operator already said no on this exact URL or near-duplicate.
-   - If any result has `score > 0.85` AND `metadata.type == "covered"`: **SOFT REJECT** this candidate. We already wrote about it.
+# Algorithm — execute ONCE, then STOP
 
-3. **Threshold:** the candidate must have score ≥ 70 AND pass novelty.
+**Step 0 (early exit).** If `CANDIDATES` is empty (`[]`), do this and nothing else:
+1. `write_state_json(key="chosen_release", value_json="null")`
+2. `write_state_json(key="skip_reason", value_json="\\"no candidates this cycle\\"")`
+3. STOP. Make no further tool calls. Do not emit any prose.
 
-You MUST persist your decision by calling `write_state_json` — DO NOT describe the assignment in prose. The framework will not parse prose.
+**Step 1 (score every candidate, in your head).** For each candidate, compute a significance score 0-100:
+- Named major lab (anthropic / openai / google / deepmind / meta / mistral / nvidia / microsoft) in `source`: **+40**
+- New artifact (not a minor patch / version bump): **+20**
+- Introduces a capability, SDK, or protocol: **+20**
+- Has working code or docs available NOW (URL points at the actual thing, not a teaser): **+20**
+- Caps at 100.
 
-If exactly one candidate clears the bar (or multiple clear and you pick the highest score, ties broken by `published_at` recency):
-- Call `write_state_json(key="chosen_release", value_json=<JSON object>)` where the JSON has keys `title`, `url`, `source`, `published_at`, `raw_summary`, `score`, `rationale`, and `top_alternatives` (next 2 highest-scoring candidates that also passed novelty, each a JSON object with the same Candidate fields, may be empty list).
-- Call `write_state_json(key="skip_reason", value_json=<JSON string>)` with a one-sentence explanation of why you picked this winner (helps debugging).
+**Step 2 (novelty check, BATCHED).** Identify the candidates with score ≥ 70. Issue ALL their `memory_bank_search` calls in a single batched response (parallel function calls). Each call uses `query=f"Have we encountered <candidate.title>?"`, `scope="ai_release_pipeline"`. Do this once — do NOT loop back to search again later.
 
-If no candidate clears the bar:
-- Call `write_state_json(key="chosen_release", value_json="null")` (the JSON literal null).
-- Call `write_state_json(key="skip_reason", value_json=<JSON string>)` explaining why nothing cleared (mention the highest-scored candidate even though it didn't make the cut)."""
+For each search result list (per candidate):
+- If any result has `score > 0.85` AND `metadata.type == "human-rejected"`: **HARD REJECT** this candidate.
+- If any result has `score > 0.85` AND `metadata.type == "covered"`: **SOFT REJECT** this candidate.
+
+**Step 3 (decide ONCE, then STOP).** Pick the highest-scored candidate that passed novelty. Ties broken by `published_at` recency.
+
+Then make EXACTLY TWO tool calls and STOP:
+
+If a winner cleared the bar (score ≥ 70 AND passed novelty):
+- `write_state_json(key="chosen_release", value_json=<JSON object>)` — keys: `title`, `url`, `source`, `published_at`, `raw_summary`, `score`, `rationale`, `top_alternatives` (next 2 highest-scoring candidates that also passed novelty, each a Candidate-shaped JSON object; may be `[]`).
+- `write_state_json(key="skip_reason", value_json=<JSON string>)` — one sentence explaining the pick.
+
+If no candidate cleared the bar:
+- `write_state_json(key="chosen_release", value_json="null")` (the JSON literal null).
+- `write_state_json(key="skip_reason", value_json=<JSON string>)` — one sentence explaining why nothing cleared.
+
+# CRITICAL — You are DONE after the two writes above
+
+After your single pair of `write_state_json` calls, you have completed your task. Do NOT:
+- Call `memory_bank_search` again
+- Re-evaluate candidates
+- Write `chosen_release` a second time
+- Output any prose
+
+The pipeline routes on the first valid `chosen_release` write. Repeated writes waste tokens and confuse downstream nodes. Trust your first decision.
+
+If you ever receive an error response containing `DECISION_ALREADY_FINALIZED` from `write_state_json`, this is a hard signal that the chosen_release was already written earlier this turn. Stop calling tools immediately and end your response with no further output."""
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +123,7 @@ DOCS_RESEARCHER_INSTRUCTION = """You are the Docs Researcher. From `state["chose
 
 Steps:
 
-1. Read `chosen_release.url`. If it points at official docs or a release blog post, call `web_fetch` on it directly. If it points at a landing page, use `google_search` to find the canonical docs URL, then `web_fetch` it.
+1. Read `chosen_release.url` and call `web_fetch` on it directly. If the page is a landing page rather than docs, follow links found in it (still via `web_fetch`) to reach the canonical docs / release notes / SDK reference. You have only `web_fetch` — there is no search tool here, so rely on links present in the fetched content.
 
 2. If the docs reference a quickstart, tutorial, or changelog page, fetch up to 3 additional pages (cap to keep token cost bounded).
 
@@ -114,9 +135,9 @@ Steps:
 
 4. Leave the GitHub-specific fields (`repo_meta`, `readme_excerpt`, `file_list`) and the community-context fields (`reactions`, `related_releases`) UNSET — those are filled by the GitHub Researcher and Context Researcher respectively.
 
-5. If the canonical docs page returns 404 or non-HTML, write a minimal dossier: `{"summary": "Could not locate official source for {title}"}`. The Architect can still produce SOMETHING.
+5. If the canonical docs page returns 404 or non-HTML, write a minimal dossier: `{"summary": "Could not locate official source for <release-title>"}`. The Architect can still produce SOMETHING.
 
-Output: write the dossier to `state["docs_research"]`."""
+Output: emit the dossier as a SINGLE JSON object — your FINAL text response. The framework writes it to `state["docs_research"]` automatically via the agent's `output_key`. Do NOT call any tool to write state — there is no such tool. After your last `web_fetch` call, your next turn must be plain JSON text, then you are done."""
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +149,7 @@ GITHUB_RESEARCHER_INSTRUCTION = """You are the GitHub Researcher. From `state["c
 Steps:
 
 1. Identify the target repo:
-   - If `chosen_release.url` matches `github.com/{owner}/{repo}`, use that.
+   - If `chosen_release.url` matches `github.com/<owner>/<repo>`, use that.
    - If `chosen_release.source == "github"`, the URL IS a repo URL.
    - Otherwise: **skip**. Write `{"summary": "No GitHub repo associated with this release."}` to `state["github_research"]` and end. Do NOT guess the repo from the release name; do NOT create placeholder URLs.
 
@@ -137,21 +158,21 @@ Steps:
 4. Call `github_list_files(owner, repo, ref="HEAD")` for the top-level layout (cap 50 entries).
 
 5. Build the dossier:
-   - `summary`: one sentence — `"{owner}/{repo}: {N} stars, last pushed {date}, language {lang}."`
+   - `summary`: one sentence — `"<owner>/<repo>: <N> stars, last pushed <date>, language <lang>."`
    - `repo_meta`: dict with `stars`, `forks`, `language`, `last_push`, `default_branch`, `html_url`.
    - `readme_excerpt`: first 1500 chars of the README.
    - `file_list`: top-level paths.
 
 6. If any individual call returns `{"error": "..."}`, write a degraded dossier: `{"summary": "Repository is private or inaccessible", "repo_meta": null}`. Do NOT raise.
 
-Output: write the dossier to `state["github_research"]`."""
+Output: emit the dossier as a SINGLE JSON object — your FINAL text response. The framework writes it to `state["github_research"]` automatically via the agent's `output_key`. Do NOT call any tool to write state — there is no such tool. After your last `github_*` call, your next turn must be plain JSON text, then you are done."""
 
 
 # ---------------------------------------------------------------------------
 # §6.4.3 — Context Researcher
 # ---------------------------------------------------------------------------
 
-CONTEXT_RESEARCHER_INSTRUCTION = """You are the Context Researcher. Build the "world around this release" — community reactions, prior versions, comparable releases from competitors. Use `google_search` and `web_fetch`.
+CONTEXT_RESEARCHER_INSTRUCTION = """You are the Context Researcher. Build the "world around this release" — community reactions, prior versions, comparable releases from competitors. You have ONLY the `google_search` tool (no `web_fetch`); use it to surface and ground claims.
 
 Rules:
 
@@ -162,9 +183,9 @@ Rules:
 
 Steps:
 
-1. Use `google_search` for "{chosen_release.title} reactions" and "{chosen_release.title} comparison". Pick the top 3 results that are NOT the release's own landing page (de-dupe by domain vs `chosen_release.url`).
+1. Issue `google_search` queries about the chosen release. Use the title and source from `state["chosen_release"]`. Search for reactions, comparisons, and related releases. Skip results that link to the release's own landing page.
 
-2. Call `web_fetch` on each. Extract:
+2. From the search results' grounded snippets, extract:
    - `reactions`: list of brief (≤ 80 char) "platform: paraphrase" lines. E.g. `"HN: 'finally a real autonomy library, not just a wrapper.'"`
    - `related_releases`: list of titles or product names with one-sentence positioning vs the chosen release. E.g. `"OpenAI Agents SDK — released 3 weeks earlier; lacks long-context tool use."`
 
@@ -173,20 +194,24 @@ Steps:
    - `reactions`: as above (max 5).
    - `related_releases`: as above (max 5).
 
-4. If `google_search` returns nothing relevant or every `web_fetch` errors, write `{"summary": "No community context found yet — this release is too fresh for reactions to have surfaced.", "reactions": [], "related_releases": []}`.
+4. If search returns nothing relevant, write `{"summary": "No community context found yet — this release is too fresh for reactions to have surfaced.", "reactions": [], "related_releases": []}`.
 
-Output: write the dossier to `state["context_research"]`."""
+Output: emit the dossier as a SINGLE JSON object — your FINAL text response. The framework writes it to `state["context_research"]` automatically via the agent's `output_key`. Do NOT call any tool to write state — there is no such tool. After your last `google_search`, your next turn must be plain JSON text, then you are done."""
 
 
 # ---------------------------------------------------------------------------
 # §6.5.1 — Architect
 # ---------------------------------------------------------------------------
 
-ARCHITECT_INSTRUCTION = """You are the Architect. From `state["chosen_release"]` and `state["research"]`, decide article shape: outline, image briefs, optional video brief, and two boolean flags (`needs_video`, `needs_repo`).
+ARCHITECT_INSTRUCTION = """You are the Architect. Decide the article shape for the chosen release: outline, image briefs, optional video brief, and two boolean flags (`needs_video`, `needs_repo`).
 
-Read:
-- `chosen_release.{title, source, raw_summary, score, rationale}`.
-- `research.{summary, headline_quotes, code_example, prerequisites, repo_meta, readme_excerpt, reactions, related_releases}`.
+The release the operator approved (your ONLY topic — do NOT write about any other release):
+
+CHOSEN_RELEASE = {chosen_release}
+
+Research dossier (use these facts grounded in real fetched content; do NOT invent):
+
+RESEARCH = {research}
 
 Decisions:
 
@@ -241,24 +266,31 @@ The pipeline parses your output and writes 5 typed state keys (`outline`, `image
 # §6.6.1 — Drafter
 # ---------------------------------------------------------------------------
 
-DRAFTER_INSTRUCTION = """You are the Drafter. Produce or rewrite a Markdown article matching `state["outline"]` exactly.
+DRAFTER_INSTRUCTION = """You are the Drafter. Produce or rewrite a Markdown article. The article MUST be about the specific release below — do NOT write about any other product, framework, or topic.
 
-Read:
-- `state["outline"]` — section plan with headings, intent, research items, word counts.
-- `state["chosen_release"]` — the release being covered.
-- `state["research"]` — merged dossier (docs + github + context).
-- `state["image_briefs"]` — list of image specs; each has `position` (e.g. `"hero"`, `"section_2"`).
-- `state["needs_video"]` — boolean.
-- `state["draft"]` — IF this is a revision pass (iteration ≥ 1). Read `draft.markdown` and `draft.critic_feedback`.
-- `state["writer_iterations"]` — current iteration count.
+CHOSEN_RELEASE = {chosen_release}
 
-Iteration 0 (writer_iterations == 0): write the full article from scratch using outline + research.
+OUTLINE = {outline}
 
-Iteration 1+ (writer_iterations >= 1): rewrite `state["draft"].markdown` addressing every point in `state["draft"].critic_feedback`. Preserve all `<!--IMG:position-->` and `<!--VID:hero-->` markers unless the feedback explicitly says to add or remove one.
+RESEARCH = {research}
+
+IMAGE_BRIEFS = {image_briefs}
+
+NEEDS_VIDEO = {needs_video}
+
+PREVIOUS_DRAFT (empty on first pass; populated on revision) = {draft?}
+
+WRITER_ITERATIONS = {writer_iterations?}
+
+CRITIC_FEEDBACK (empty on first pass) = {critic_feedback?}
+
+Iteration 0 (writer_iterations == 0): write the full article from scratch. Title is `OUTLINE.working_title`. Sections follow `OUTLINE.sections[*].heading` in order. Every fact must come from CHOSEN_RELEASE or RESEARCH — do NOT pull material from training data about other releases.
+
+Iteration 1+ (writer_iterations >= 1): rewrite PREVIOUS_DRAFT addressing every point in CRITIC_FEEDBACK. Preserve all `<!--IMG:position-->` and `<!--VID:hero-->` markers unless the feedback explicitly says to add or remove one. Do NOT change the topic — the article remains about CHOSEN_RELEASE.
 
 CRITICAL — the post-Drafter Critic step does an OBJECTIVE marker check and forces "revise" if markers are wrong:
 
-- For each entry in `state["image_briefs"]`, insert exactly `<!--IMG:{position}-->` at the corresponding spot. The hero marker goes immediately after the title/subtitle, before the opening paragraph. Inline markers go after the section their `position` describes (e.g. `<!--IMG:section_2-->` AFTER section 2's body).
+- For each entry in `state["image_briefs"]`, insert exactly `<!--IMG:<position>-->` at the corresponding spot. The hero marker goes immediately after the title/subtitle, before the opening paragraph. Inline markers go after the section their `position` describes (e.g. `<!--IMG:section_2-->` AFTER section 2's body).
 - If `state["needs_video"]` is true, insert exactly `<!--VID:hero-->` where the demo should appear (typically right after the hero image or initial setup section).
 - Do NOT invent positions that aren't in `image_briefs`. Do NOT omit any.
 - Do NOT fill in actual image URLs — `<!--IMG:hero-->` literal. The Publisher injects URLs later.
@@ -276,15 +308,19 @@ Output: emit ONLY the Markdown article. No JSON envelope, no commentary."""
 # §6.6.2 — Critic
 # ---------------------------------------------------------------------------
 
-CRITIC_INSTRUCTION = """You are the Critic. Score `state["draft"]` against an 8-item rubric and emit a single JSON verdict.
+CRITIC_INSTRUCTION = """You are the Critic. Score the draft against an 8-item rubric and emit a single JSON verdict.
 
-Read:
-- `state["draft"].markdown`
-- `state["outline"]`
-- `state["image_briefs"]`
-- `state["needs_video"]`
-- `state["chosen_release"]`
-- `state["research"]`
+DRAFT_MARKDOWN = {draft}
+
+OUTLINE = {outline}
+
+IMAGE_BRIEFS = {image_briefs}
+
+NEEDS_VIDEO = {needs_video}
+
+CHOSEN_RELEASE = {chosen_release}
+
+RESEARCH = {research}
 
 Mark `verdict = "revise"` if ANY of these fail:
 
@@ -313,16 +349,20 @@ The pipeline parses your verdict AND independently re-checks the placeholder cou
 # §6.7.1 — Image Asset Agent
 # ---------------------------------------------------------------------------
 
-IMAGE_ASSET_INSTRUCTION = """You are the Image Asset Agent. For each entry in `state["image_briefs"]`, generate one image, upload it to GCS, and emit the resulting `image_assets` list.
+IMAGE_ASSET_INSTRUCTION = """You are the Image Asset Agent. For each entry in `image_briefs` below, generate one image, upload it to GCS, and emit the resulting list.
 
-For each `brief` in `state["image_briefs"]` (process sequentially — Imagen has per-call quota):
+CHOSEN_RELEASE = {chosen_release}
+
+IMAGE_BRIEFS = {image_briefs}
+
+For each `brief` in IMAGE_BRIEFS (process sequentially — Imagen has per-call quota):
 
 1. Compose a richer prompt for Imagen. Combine the brief's `description` with style modifier and release context:
    `f"{brief.style} of {brief.description} (context: {chosen_release.title})"`.
 
 2. Call `generate_image(prompt=<above>, aspect_ratio=brief.aspect_ratio, style=brief.style)`. The tool returns raw PNG bytes.
 
-3. Build a deterministic slug: `f"{cycle_id}/image-{brief.position}.png"` where `cycle_id` is the first 8 chars of the session id. Call `upload_to_gcs(payload=<bytes>, slug=<slug>, content_type="image/png")` to get the public HTTPS URL.
+3. Build a deterministic slug: `f"<cycle_id>/image-<brief.position>.png"` where `cycle_id` is the first 8 chars of the session id. Call `upload_to_gcs(bytes_data=<bytes>, slug=<slug>, content_type="image/png")` to get the public HTTPS URL.
 
 4. Generate `alt_text` — ONE sentence describing what's in the image for screen readers. Describe the IMAGE CONTENT, not what the article is about.
 
@@ -330,7 +370,7 @@ For each `brief` in `state["image_briefs"]` (process sequentially — Imagen has
 
 6. If `generate_image` fails (Imagen 404 / quota / safety filter): emit a placeholder `ImageAsset(position=brief.position, url="", alt_text="(image generation failed)", aspect_ratio=brief.aspect_ratio)` and continue to the next brief. The Editor will see broken assets and decide.
 
-Output: a JSON array with `len(image_briefs)` entries, in the same order as the briefs. The pipeline writes it to `state["image_assets"]`."""
+Output: emit the JSON array as your FINAL text response (one entry per brief in `image_briefs`, in the same order). The framework writes it to `state["image_assets"]` automatically via the agent's `output_key`. Do NOT call any tool to write state — there is no such tool."""
 
 
 # ---------------------------------------------------------------------------
@@ -339,18 +379,26 @@ Output: a JSON array with `len(image_briefs)` entries, in the same order as the 
 
 REPO_BUILDER_INSTRUCTION = """You are the Repo Builder. Create a curated public GitHub starter repo for the chosen release and commit a starter file set in one atomic commit.
 
-Read: `state["chosen_release"]`, `state["research"]`, `state["outline"]`, `state["draft"]`, `state["image_assets"]`.
+CHOSEN_RELEASE = {chosen_release}
+
+RESEARCH = {research}
+
+OUTLINE = {outline}
+
+DRAFT_MARKDOWN = {draft}
+
+IMAGE_ASSETS = {image_assets}
 
 Steps:
 
 1. Compute the repo name: `f"airel-{outline.article_type}-{slug(chosen_release.title)}"`, capped at 100 chars (GitHub limit). Slug rules: lowercase ASCII, hyphens only, no consecutive hyphens, no leading/trailing hyphen.
 
 2. Call `github_create_repo(name=<above>, description=outline.working_title, private=false)`. The tool reads `GITHUB_ORG` from env and creates the repo there.
-   - If the response is `{"error": "..."}` and the error mentions name conflict (422): retry once with `f"{name}-{cycle_id_short}"`. If still failing, write nothing to `state["starter_repo"]` and end.
+   - If the response is `{"error": "..."}` and the error mentions name conflict (422): retry once with `f"<name>-<cycle_id_short>"`. If still failing, write nothing to `state["starter_repo"]` and end.
 
 3. Compose the starter file set. Each is a `(path, content)` tuple. Required:
    - `README.md` — full Markdown of `state["draft"].markdown`, with `<!--IMG:position-->` placeholders REPLACED by `![alt_text](url)` using the matching `state["image_assets"]` entry. Drop `<!--VID:hero-->` markers entirely (the README is text-only — video stays in the article).
-   - `examples/quickstart.{ext}` — verbatim from `state["research"].code_example`. Pick `{ext}` based on the language of the snippet: `py` for Python, `ts` for TypeScript, `js` for JavaScript, `sh` for shell. Default `py`.
+   - `examples/quickstart.<ext>` — verbatim from `state["research"].code_example`. Pick `<ext>` based on the language of the snippet: `py` for Python, `ts` for TypeScript, `js` for JavaScript, `sh` for shell. Default `py`.
    - `requirements.txt` (Python) or `package.json` (JS/TS) — generated from `state["research"].prerequisites` if it lists package names. Skip if no packages identifiable.
    - `.gitignore` — language-default template (Python = `__pycache__/`, `*.pyc`, `.venv/`, `.env`).
 
@@ -362,22 +410,26 @@ Steps:
 
 If any step before commit fails non-recoverably, do NOT emit a partial `StarterRepo` — let the workflow proceed with `state["starter_repo"] = null` (the Editor will see the broken state).
 
-Output: write the `StarterRepo` JSON to `state["starter_repo"]`."""
+Output: emit the `StarterRepo` JSON as your FINAL text response. The framework writes it to `state["starter_repo"]` automatically via the agent's `output_key`. Do NOT call any tool to write state — there is no such tool."""
 
 
 # ---------------------------------------------------------------------------
 # §6.10 — Revision Writer
 # ---------------------------------------------------------------------------
 
-REVISION_WRITER_INSTRUCTION = """You are the Revision Writer. You run when the Editor pressed "Revise" with feedback. Rewrite `state["draft"].markdown` addressing `state["human_feedback"].feedback`.
+REVISION_WRITER_INSTRUCTION = """You are the Revision Writer. You run when the Editor pressed "Revise" with feedback. Rewrite the draft below — DO NOT START OVER, do NOT change the topic — addressing the operator's feedback.
 
-Read:
-- `state["draft"].markdown` — current draft.
-- `state["human_feedback"].feedback` — the operator's revision request.
-- `state["outline"]` — must still be satisfied after the rewrite.
-- `state["image_briefs"]` — placeholder count must still match.
-- `state["chosen_release"]` — subject of the article.
-- `state["research"]` — for fact grounding.
+CURRENT_DRAFT_MARKDOWN = {draft}
+
+OPERATOR_FEEDBACK = {human_feedback?}
+
+OUTLINE = {outline}
+
+IMAGE_BRIEFS = {image_briefs}
+
+CHOSEN_RELEASE = {chosen_release}
+
+RESEARCH = {research}
 
 Apply the feedback while preserving:
 

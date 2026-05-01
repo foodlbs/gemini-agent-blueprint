@@ -170,19 +170,39 @@ def test_factory_picks_inmemory_when_env_set(monkeypatch):
 
 def test_factory_picks_vertex_when_env_set(monkeypatch):
     monkeypatch.setenv("MEMORY_BANK_BACKEND", "vertex")
-    monkeypatch.setenv("MEMORY_BANK_ID", "projects/x/locations/us-west1/memoryBanks/y")
+    # Memory Bank is attached to the ReasoningEngine itself — the env
+    # var holds the engine's bare ID. Inside Agent Runtime this is
+    # auto-set; tests inject it manually.
+    monkeypatch.setenv("GOOGLE_CLOUD_AGENT_ENGINE_ID", "1234567890")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-west1")
     # Construction may hit the network; mock the constructor.
     from google.adk.memory import VertexAiMemoryBankService
     with patch.object(VertexAiMemoryBankService, "__init__", return_value=None) as mocked:
         service = _build_service()
     assert isinstance(service, VertexAiMemoryBankService)
     assert mocked.called
+    # Confirm the engine ID was passed as agent_engine_id, not a wrong kwarg.
+    assert mocked.call_args.kwargs["agent_engine_id"] == "1234567890"
+
+
+def test_factory_strips_full_resource_path_to_bare_id(monkeypatch):
+    """Operator may paste the full resource path; we must strip it."""
+    monkeypatch.setenv("MEMORY_BANK_BACKEND", "vertex")
+    monkeypatch.setenv(
+        "GOOGLE_CLOUD_AGENT_ENGINE_ID",
+        "projects/test/locations/us-west1/reasoningEngines/9876543210",
+    )
+    from google.adk.memory import VertexAiMemoryBankService
+    with patch.object(VertexAiMemoryBankService, "__init__", return_value=None) as mocked:
+        _build_service()
+    assert mocked.call_args.kwargs["agent_engine_id"] == "9876543210"
 
 
 def test_factory_raises_when_vertex_chosen_but_id_missing(monkeypatch):
     monkeypatch.setenv("MEMORY_BANK_BACKEND", "vertex")
-    monkeypatch.delenv("MEMORY_BANK_ID", raising=False)
-    with pytest.raises(RuntimeError, match="MEMORY_BANK_ID must be set"):
+    monkeypatch.delenv("GOOGLE_CLOUD_AGENT_ENGINE_ID", raising=False)
+    with pytest.raises(RuntimeError, match="GOOGLE_CLOUD_AGENT_ENGINE_ID must be set"):
         _build_service()
 
 

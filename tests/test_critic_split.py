@@ -20,7 +20,7 @@ def _ctx(state: dict) -> MagicMock:
 
 
 def _draft(markdown: str = "Body") -> Draft:
-    return Draft(markdown=markdown, iteration=0)
+    return markdown
 
 
 def _briefs(positions: list[str]) -> list[ImageBrief]:
@@ -44,7 +44,7 @@ def test_parses_clean_accept_verdict():
     })
     event = critic_split(None, ctx)
     assert event.output["verdict"] == "accept"
-    assert ctx.state["draft"].critic_verdict == "accept"
+    assert ctx.state["critic_verdict"] == "accept"
     assert ctx.state["writer_iterations"] == 1
 
 
@@ -59,7 +59,7 @@ def test_parses_revise_verdict_with_feedback():
     })
     event = critic_split(None, ctx)
     assert event.output["verdict"] == "revise"
-    assert "tighten intro" in ctx.state["draft"].critic_feedback
+    assert "tighten intro" in ctx.state["critic_feedback"]
 
 
 def test_strips_markdown_fences_around_json():
@@ -131,7 +131,7 @@ def test_image_marker_count_mismatch_overrides_accept_to_revise():
     })
     event = critic_split(None, ctx)
     assert event.output["verdict"] == "revise"
-    assert "image markers" in ctx.state["draft"].critic_feedback
+    assert "image markers" in ctx.state["critic_feedback"]
 
 
 def test_video_marker_present_when_needs_video_false_overrides_accept():
@@ -147,7 +147,7 @@ def test_video_marker_present_when_needs_video_false_overrides_accept():
     })
     event = critic_split(None, ctx)
     assert event.output["verdict"] == "revise"
-    assert "video marker" in ctx.state["draft"].critic_feedback
+    assert "video marker" in ctx.state["critic_feedback"]
 
 
 def test_video_marker_missing_when_needs_video_true_overrides_accept():

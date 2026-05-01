@@ -27,6 +27,24 @@ logger = logging.getLogger(__name__)
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 _MAX_CANDIDATES = 25
+# Match each balanced top-level `{...}` object inside the array. Used
+# only as a fallback when bulk json.loads fails — splits the array
+# brace-by-brace so one bad candidate doesn't drop all 25.
+_OBJECT_RE = re.compile(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", re.DOTALL)
+
+
+def _per_object_recover(cleaned: str) -> list:
+    """When bulk parse fails, salvage individual valid objects from the
+    array. Returns parsed dicts; skips any object that won't parse."""
+    recovered = []
+    for match in _OBJECT_RE.finditer(cleaned):
+        try:
+            obj = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            recovered.append(obj)
+    return recovered
 
 # Priority order per §6.1 — when capping, prefer named-lab posts in this order.
 # Lower index = higher priority.
@@ -59,9 +77,22 @@ def scout_split(node_input, ctx: Context) -> Event:
     try:
         items = json.loads(cleaned)
     except json.JSONDecodeError as e:
-        logger.warning("scout_split: JSON parse failed (%s); writing empty candidates", e)
-        ctx.state["candidates"] = []
-        return Event(output={"count": 0, "reason": f"json_decode_error: {e}"})
+        # Scout occasionally produces JSON with bad escape sequences in
+        # raw_summary strings (literal `\` characters from arxiv abstracts
+        # etc.). Rather than dropping ALL 25 candidates, fall back to
+        # per-object recovery: split the array by top-level `},{`
+        # boundaries and try each candidate independently.
+        logger.warning(
+            "scout_split: bulk JSON parse failed (%s); trying per-object recovery",
+            e,
+        )
+        items = _per_object_recover(cleaned)
+        if not items:
+            logger.warning("scout_split: per-object recovery yielded nothing; writing empty candidates")
+            ctx.state["candidates"] = []
+            return Event(output={"count": 0, "reason": f"json_decode_error: {e}"})
+        logger.info("scout_split: per-object recovery rescued %d/%s candidates",
+                    len(items), "?")
 
     if not isinstance(items, list):
         # Some LLMs emit `{"candidates": [...]}` even when prompted for a bare list.
