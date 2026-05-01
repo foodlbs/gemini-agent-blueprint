@@ -85,7 +85,7 @@ incoming-edge count broken into unconditional vs conditional. True fan-in =
 | `video_asset_or_skip` | 1 (image_asset_node) | no |
 | `gather_assets` | 1 (video_asset_or_skip) | no — name misleading; only 1 incoming |
 | `route_needs_repo` | 1 (gather_assets) | no |
-| `editor_request` | 3 conditional (WITHOUT_REPO + repo_builder + revision_writer loop) — mutually exclusive per traversal | no — convergence, not fan-in |
+| `editor_request` | 1 conditional (WITHOUT_REPO route) + 2 unconditional (repo_builder, revision_writer) | safe convergence, not fan-in (see exemption note below) |
 | `record_editor_verdict` | 1 (editor_request) | no |
 | `route_editor_verdict` | 1 (record_editor_verdict) | no |
 | `record_editor_rejection` | 1 conditional | no — terminal |
@@ -97,7 +97,36 @@ unconditional + route_critic_verdict REVISE conditional loopback). The
 loopback is the intended write-rewrite loop (creates `@N` instances per
 iteration), not a fan-in problem.
 
-**Conclusion: `gather_research` is the only true fan-in. Single fix needed.**
+**Conclusion: `gather_research` is the only fan-in that needs a `JoinFunctionNode`. `editor_request` is exempt — see below.**
+
+### Audit correction: `editor_request` exemption
+
+The graph-shape regression test (Task 4) revealed that the original audit
+miscategorized `editor_request`'s incoming edges. The actual shape:
+
+- `route_needs_repo --[WITHOUT_REPO]--> editor_request` (conditional)
+- `repo_builder --> editor_request` (unconditional)
+- `revision_writer --> editor_request` (unconditional)
+
+Two of the three are unconditional, which a static analysis flags as
+fan-in. However, the runtime semantics make them mutually exclusive:
+
+- **Initial cycle, WITHOUT_REPO**: only the conditional edge fires.
+- **Initial cycle, WITH_REPO**: only `repo_builder → editor_request` fires
+  (the WITHOUT_REPO conditional doesn't match).
+- **Revision loop**: `revision_writer → editor_request` fires once per
+  revision iteration, **sequentially after** the previous editor_request
+  resolved with `verdict="revise"`. It cannot fire concurrently with
+  the initial-cycle edges.
+
+So `editor_request` is a legitimate convergence pattern (multiple sources,
+sequential firing), not a concurrent fan-in. Refactoring it as a
+`JoinFunctionNode` would break the revision loop's intended N-fires
+behavior.
+
+The graph-shape test exempts this node via a `KNOWN_SAFE_FAN_IN` dict
+mapping node-name → reason. Adding to this dict requires the same kind
+of analysis above (proof of mutual exclusivity at runtime).
 
 ## Design
 
