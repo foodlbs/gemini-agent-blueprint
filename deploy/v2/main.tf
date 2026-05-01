@@ -36,12 +36,12 @@ provider "google" {
 # ---------------------------------------------------------------------------
 
 variable "project_name" {
-  description = "Resource-name prefix shared with deploy.py (PROJECT_PREFIX env var). Drives SA names, secret names, bucket names. Default 'gab' = gemini-agent-blueprint."
+  description = "Resource-name prefix shared with deploy.py via TF_VAR_project_name env var. Drives SA names, secret names, bucket names. Default 'gab' = gemini-agent-blueprint."
   type        = string
   default     = "gab"
   validation {
-    condition     = can(regex("^[a-z][a-z0-9-]{1,28}$", var.project_name))
-    error_message = "project_name must be 2-29 chars, lowercase letters/digits/hyphens, starting with a letter."
+    condition     = can(regex("^[a-z][a-z0-9-]{1,13}$", var.project_name))
+    error_message = "project_name must be 2-14 chars, lowercase letters/digits/hyphens, starting with a letter. Max length is bounded by GCP's 30-char Service Account account_id limit applied to the longest derived name '${var.project_name}-telegram-bridge'."
   }
 }
 
