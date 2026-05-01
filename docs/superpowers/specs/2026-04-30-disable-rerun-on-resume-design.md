@@ -108,8 +108,13 @@ will cover the SVG-canonical architecture rework:
 - `LoopAgent(max_iterations=3)` wrapping the writer loop
 - `ParallelAgent` for the researcher pool (docs / github / context)
 - `ParallelAgent` for the asset stage (image / video)
-- Restructure to remove the manual `writer_iterations` counter + sticky-key
-  state hacks accumulated to work around the current edge-based loop
+- Replace the manual `writer_iterations` counter (in `critic_split` + the
+  `>= MAX_WRITER_ITERATIONS` check in `route_critic_verdict`) with `LoopAgent`'s
+  built-in iteration cap.
+- Replace the sticky-key first-write-wins logic in
+  `tools/state_helpers.write_state_json` (the `chosen_release_write_count`
+  guard) with an `EscalationChecker(BaseAgent)` pattern wrapping Triage in a
+  bounded LoopAgent, per the canonical ADK sample (`deep-search`).
 
 These are bigger refactors that should not block restoring the current
 working state.
