@@ -197,6 +197,10 @@ class PipelineState(BaseModel):
     context_research: Optional[str] = None
     research: Optional[ResearchDossier] = None
     """Merged dossier produced by gather_research from the three above."""
+    gather_research_call_count: int = 0
+    """Counter incremented by `gather_research` on each predecessor trigger.
+    Once it reaches 3 (one per researcher), the join proceeds and yields
+    output. See docs/superpowers/specs/2026-05-01-fan-in-join-design.md."""
 
     # --- Architect -----------------------------------------------------------
     architect_raw: Optional[str] = None
