@@ -11,6 +11,7 @@ import re
 
 from google.adk import Context, Event
 
+from nodes._join_node import JoinFunctionNode
 from shared.models import ResearchDossier
 
 logger = logging.getLogger(__name__)
@@ -65,8 +66,19 @@ def _parse_dossier(raw: object, source_label: str) -> ResearchDossier:
     return _empty_dossier()
 
 
-def gather_research(node_input, ctx: Context) -> Event:
-    """§6.4.4 — parse + merge docs/github/context dossiers into `research`."""
+def _gather_research_impl(node_input, ctx: Context) -> Event:
+    """§6.4.4 — counter-gated join: parse + merge docs/github/context
+    dossiers into `research` once all 3 researchers have triggered.
+
+    See docs/superpowers/specs/2026-05-01-fan-in-join-design.md for why
+    this is gated (3 unconditional incoming edges → ADK re-triggers per
+    predecessor → without the gate the entire writer chain cascades 3x).
+    """
+    n = ctx.state.get("gather_research_call_count", 0) + 1
+    ctx.state["gather_research_call_count"] = n
+    if n < 3:
+        return Event()  # WAITING — predecessors can re-trigger.
+
     docs    = _parse_dossier(ctx.state.get("docs_research"),    "docs")
     gh      = _parse_dossier(ctx.state.get("github_research"),  "github")
     context = _parse_dossier(ctx.state.get("context_research"), "context")
@@ -89,6 +101,12 @@ def gather_research(node_input, ctx: Context) -> Event:
     return Event(output={"sections_filled": [
         k for k, v in merged.model_dump().items() if v not in (None, [], "")
     ]})
+
+
+gather_research = JoinFunctionNode(
+    func=_gather_research_impl,
+    name="gather_research",
+)
 
 
 def gather_assets(node_input, ctx: Context) -> Event:
