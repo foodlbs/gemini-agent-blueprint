@@ -60,7 +60,6 @@ from shared.models import PipelineState
 root_agent = Workflow(
     name="ai_release_pipeline_v2",
     state_schema=PipelineState,
-    rerun_on_resume=False,            # See docs/superpowers/specs/2026-04-30-disable-rerun-on-resume-design.md
     edges=[
         # --- 1. Scout → scout_split → Triage → route on chosen_release ---
         # scout_split parses Scout's scout_raw (markdown-fenced JSON) into
