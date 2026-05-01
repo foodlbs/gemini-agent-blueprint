@@ -1,26 +1,30 @@
-"""One-shot deployer for ai-release-pipeline-v2 — DESIGN.v2.md §10.1.
+"""One-shot deployer for the gemini-agent-blueprint — DESIGN.v2.md §10.1.
 
 Run from the repo root:
 
     uv run python deploy.py
 
 REQUIRED ENV (from .env or shell):
-  GOOGLE_CLOUD_PROJECT  GCP project ID (e.g. gen-lang-client-0366435980)
+  GOOGLE_CLOUD_PROJECT        GCP project ID (e.g. gen-lang-client-0366435980)
+  GITHUB_ORG                  GitHub org/user that owns release-tracked repos
+  TELEGRAM_APPROVAL_CHAT_ID   Telegram chat ID for HITL approval messages
 
 OPTIONAL ENV (with defaults):
-  GITHUB_ORG                  default "pixelcanon"
-  TELEGRAM_APPROVAL_CHAT_ID   default "8481672863"
+  REGION                      default "us-west1"
+  PROJECT_DISPLAY_NAME        default "gemini-agent-blueprint"
+  PROJECT_APP_NAME            default "gemini_agent_blueprint" (Python ident)
+  TF_VAR_project_name         default "gab" — drives SA / secret / bucket names
 
 INVARIANTS:
-  - Region is HARDCODED to us-west1 (per §3 + §10). Do NOT read from
+  - Region must be a regional endpoint (default us-west1). Do NOT read from
     GOOGLE_CLOUD_LOCATION — that is "global" locally for Gemini calls
     and would fail agent_engines.create which requires a regional
     endpoint.
-  - The engine's runtime SA is `airel-v2-app@PROJECT.iam` (§10.3) —
-    must exist before this script runs.
-  - Two Secret Manager secrets must exist: airel-v2-github-token,
-    airel-v2-telegram-bot-token (§10.4).
-  - Staging GCS bucket gs://PROJECT-airel-v2-staging must exist —
+  - The engine's runtime SA is `{PROJECT_PREFIX}-app@PROJECT.iam` (§10.3) —
+    must exist before this script runs (provisioned via terraform).
+  - Two Secret Manager secrets must exist: {PROJECT_PREFIX}-github-token,
+    {PROJECT_PREFIX}-telegram-bot-token (§10.4).
+  - Staging GCS bucket gs://PROJECT-{PROJECT_PREFIX}-staging must exist —
     Vertex SDK uploads the source tarball there but does NOT create it.
 
 API NOTE (deviation from DESIGN.v2.md §10.1):
@@ -50,10 +54,25 @@ import pathlib
 import sys
 
 
-# Region pin per §3 — independent of GOOGLE_CLOUD_LOCATION.
-REGION  = "us-west1"
-DISPLAY = "ai-release-pipeline-v2"
-ID_FILE = pathlib.Path("deploy/.deployed_resource_id")
+# Region pin — independent of GOOGLE_CLOUD_LOCATION. Default us-west1 because
+# Vertex AI Agent Runtime requires a regional endpoint and that's where
+# the reference deployment lives. Override with REGION env var if needed.
+REGION         = os.environ.get("REGION", "us-west1")
+
+# Display name shown in the Vertex AI Agent Runtime console.
+DISPLAY        = os.environ.get("PROJECT_DISPLAY_NAME", "gemini-agent-blueprint")
+
+# Internal app_name passed to AdkApp — must be a valid Python identifier
+# (no hyphens). Used by the ADK runtime to resolve the agent module.
+APP_NAME       = os.environ.get("PROJECT_APP_NAME", "gemini_agent_blueprint")
+
+# Resource-name prefix shared with terraform. Drives SA names, secret
+# names, bucket names. Default "gab" matches terraform's var.project_name
+# default. If you set TF_VAR_project_name=myagent, set this to match
+# (or rely on the auto-pickup from TF_VAR_project_name below).
+PROJECT_PREFIX = os.environ.get("TF_VAR_project_name", "gab")
+
+ID_FILE        = pathlib.Path("deploy/.deployed_resource_id")
 
 # Mirror the §10.2 dependency pins. These get installed in the
 # managed runtime environment when the engine is created.
@@ -101,10 +120,14 @@ def main() -> None:
     from google.cloud.aiplatform_v1 import types as aip_types
 
     project = _required("GOOGLE_CLOUD_PROJECT")
-    github_org = os.environ.get("GITHUB_ORG", "pixelcanon")
-    approval_chat = os.environ.get("TELEGRAM_APPROVAL_CHAT_ID", "8481672863")
-    sa_email = f"airel-v2-app@{project}.iam.gserviceaccount.com"
-    staging_bucket = f"gs://{project}-airel-v2-staging"
+    github_org = os.environ.get("GITHUB_ORG")
+    if not github_org:
+        sys.exit("ERROR: GITHUB_ORG is not set. See .env.example.")
+    approval_chat = os.environ.get("TELEGRAM_APPROVAL_CHAT_ID")
+    if not approval_chat:
+        sys.exit("ERROR: TELEGRAM_APPROVAL_CHAT_ID is not set. See .env.example.")
+    sa_email = f"{PROJECT_PREFIX}-app@{project}.iam.gserviceaccount.com"
+    staging_bucket = f"gs://{project}-{PROJECT_PREFIX}-staging"
 
     print(f"Project:        {project}", file=sys.stderr)
     print(f"Region:         {REGION}", file=sys.stderr)
@@ -124,8 +147,8 @@ def main() -> None:
     # fails .isidentifier() and crashes the runtime at startup.
     app = agent_engines.AdkApp(
         agent=root_agent,
-        app_name="ai_release_pipeline_v2",
-        enable_tracing=True,            # Cloud Trace integration (§11.1)
+        app_name=APP_NAME,
+        enable_tracing=True,
     )
 
     # env_vars accepts mixed plain strings and SecretRef values per the
@@ -140,16 +163,16 @@ def main() -> None:
     env_vars = {
         "GITHUB_ORG":                github_org,
         "TELEGRAM_APPROVAL_CHAT_ID": approval_chat,
-        "GCS_ASSETS_BUCKET":         f"{project}-airel-assets-v2",
+        "GCS_ASSETS_BUCKET":         f"{project}-{PROJECT_PREFIX}-assets",
         "MEMORY_BANK_BACKEND":       "vertex",
         "FIRESTORE_DATABASE":        "(default)",
         # Secret-backed env vars — values are read at runtime from
         # Secret Manager via the platform-managed sidecar.
         "GITHUB_TOKEN": aip_types.SecretRef(
-            secret="airel-v2-github-token", version="latest"
+            secret=f"{PROJECT_PREFIX}-github-token", version="latest"
         ),
         "TELEGRAM_BOT_TOKEN": aip_types.SecretRef(
-            secret="airel-v2-telegram-bot-token", version="latest"
+            secret=f"{PROJECT_PREFIX}-telegram-bot-token", version="latest"
         ),
     }
 
@@ -183,7 +206,7 @@ def main() -> None:
             requirements=REQUIREMENTS,
             extra_packages=extra_packages,
             display_name=DISPLAY,
-            description="AI release → article pipeline (graph workflow + HITL)",
+            description=f"{DISPLAY} — AI release → article pipeline (graph workflow + HITL)",
             env_vars=env_vars,
             service_account=sa_email,
         )
