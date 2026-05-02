@@ -5,7 +5,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![ADK 2.0 Beta](https://img.shields.io/badge/google--adk-2.0.0b1-orange.svg)](https://google.github.io/adk-docs/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Medium Article](https://img.shields.io/badge/Medium-Read_the_story-12100E.svg)](<MEDIUM_URL>)
+[![Medium Article](https://img.shields.io/badge/Medium-Read_the_story-12100E.svg)](https://medium.com/@rahulpatel052197/my-ai-agent-deployed-cleanly-and-never-wrote-a-single-article-cd801cfc0863)
 
 ## What it does at a glance
 
@@ -48,7 +48,7 @@ A few other lessons fell out of the rebuild and they're folded into the article:
 - **Memory Bank for "have I covered this?".** Dedup against an embedding-backed memory of past topics, not against a Firestore-of-everything-I-once-saw. The Triage step queries it; the Publisher writes a fact back on success.
 - **A graph-shape regression test.** A single pytest that diffs the workflow's edge structure against a snapshot. Catches accidental restructuring during refactors before the deploy step does.
 
-📖 **[Read the full story →](<MEDIUM_URL>)** — five engineering lessons from rebuilding it.
+📖 **[Read the full story →](https://medium.com/@rahulpatel052197/my-ai-agent-deployed-cleanly-and-never-wrote-a-single-article-cd801cfc0863)** — five engineering lessons from rebuilding it.
 
 ## What's inside
 
@@ -209,7 +209,7 @@ Edit [`agents/repo_builder.py`](agents/repo_builder.py) — this is the "produce
 - Sports-news bot (poll team RSS, image-heavy, social tone)
 - Your own thing
 
-📖 More on the design tradeoffs in the [Medium article](<MEDIUM_URL>) →
+📖 More on the design tradeoffs in the [Medium article](https://medium.com/@rahulpatel052197/my-ai-agent-deployed-cleanly-and-never-wrote-a-single-article-cd801cfc0863) →
 
 ## Project structure
 
@@ -269,11 +269,9 @@ Runs the full suite (~170 tests), including:
 
 ## Read the story • Connect
 
-- 📖 **Medium article:** [The full story behind this build](<MEDIUM_URL>)
-- 🐦 **Tweet thread:** [the 5-tweet version](<TWITTER_URL>)
-- 💼 **LinkedIn:** [the standalone post](<LINKEDIN_URL>)
+- 📖 **Medium article:** [The full story behind this build](https://medium.com/@rahulpatel052197/my-ai-agent-deployed-cleanly-and-never-wrote-a-single-article-cd801cfc0863)
 
-I'm a full-stack developer focused on AI/LLM-powered applications. Primary languages: Python, TypeScript. Find me on [GitHub](https://github.com/<your-handle>) and [Twitter](https://twitter.com/<your-handle>).
+I'm a full-stack developer focused on AI/LLM-powered applications. Primary languages: Python, TypeScript. Find me on [GitHub](https://github.com/foodlbs) 
 
 ## License & acknowledgements
 
