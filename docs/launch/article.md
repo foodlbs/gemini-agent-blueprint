@@ -42,12 +42,13 @@ The right answer is ADK 2.0's `RequestInput`. The workflow yields a `RequestInpu
 
 ADK 2.0 was at `2.0.0b1` when I started. Beta means breaking changes between minor versions, thin docs, and sample code that confidently demonstrates patterns the framework doesn't actually support. I almost charged in anyway. Then I lost a half-day to one wrong assumption and spent the next day on four spike scripts instead.
 
-| Spike | Question | Result |
-|---|---|---|
-| 1 | Does `Workflow(edges=[...])` with function nodes + LlmAgents work? | Yes, but routes are emitted by `ctx.route`, NOT `Event(output=...)`. Sample code is misleading. |
-| 2 | Does `RequestInput` actually pause without holding a request? | Yes, and the resume contract is fiddly: `Part.from_function_response()` does NOT accept an id; build `FunctionResponse(...)` directly. |
-| 3 | Is managed Memory Bank wired through `Runner(memory_service=...)`? | Yes. `InMemoryMemoryService` for local dev, `VertexAiMemoryBankService` in prod. Same agent code. |
-| 4 | Can a Telegram callback bridge into `RequestInput` resume? | Yes. `callback_data` is capped at 64 bytes; use prefix encoding with a Firestore lookup for full IDs. |
+**Spike 1 — Does `Workflow(edges=[...])` with function nodes + LlmAgents work?** Yes, but routes are emitted by `ctx.route`, NOT `Event(output=...)`. Sample code is misleading.
+
+**Spike 2 — Does `RequestInput` actually pause without holding a request?** Yes, and the resume contract is fiddly: `Part.from_function_response()` does NOT accept an id; build `FunctionResponse(...)` directly.
+
+**Spike 3 — Is managed Memory Bank wired through `Runner(memory_service=...)`?** Yes. `InMemoryMemoryService` for local dev, `VertexAiMemoryBankService` in prod. Same agent code.
+
+**Spike 4 — Can a Telegram callback bridge into `RequestInput` resume?** Yes. `callback_data` is capped at 64 bytes; use prefix encoding with a Firestore lookup for full IDs.
 
 Each spike was throwaway code — a single Python file that exercised one primitive and answered one go/no-go question. I deleted them once they served their purpose.
 
