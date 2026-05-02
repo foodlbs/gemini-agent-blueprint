@@ -40,7 +40,7 @@ flowchart LR
   style G fill:#fff3cd
 ```
 
-Five phases, two yellow gates. Phases 1, 3, 4, and 5 are mostly LLM work; phases 2 and 5 are where the pipeline parks itself for hours waiting on a human. Three patterns recur across the graph and deserve up-front explanation.
+Five phases, two yellow gates. Phases 1, 3, and 4 are mostly LLM work; phases 2 and 5 are the HITL gates where the pipeline parks itself for hours waiting on a human. Three patterns recur across the graph and deserve up-front explanation.
 
 ### Pattern 1 — Dict-edge routing
 
@@ -210,7 +210,7 @@ Scout's `output_key` writes raw markdown-fenced JSON to `state.scout_raw`. The n
 
 The same `_raw` → `_split` pattern recurs three times in the pipeline (Scout, Architect, Critic): the LLM emits text, a deterministic function node parses, and the typed value lands in state. This is intentional — see lesson 3 in section 10.
 
-Triage runs next. Its model is `gemini-2.5-flash-lite` (a tier below Scout) and its tools are `memory_bank_search` and `write_state_json`. For each candidate, Triage scores significance against a rubric (named-lab source: +40; new artifact: +20; introduces a capability: +20; runnable code or docs available now: +20), then queries Memory Bank for similarity matches against `covered` and `human-rejected` facts. Hard URL match overrides similarity score; otherwise a 0.85 threshold suppresses the candidate. Triage either writes one `chosen_release` plus a `skip_reason` or writes `chosen_release=None` plus a reason.
+Triage runs next. Its model is `gemini-2.5-flash-lite` (a tier below Scout) and its tools are `memory_bank_search` and `write_state_json`. For each candidate, Triage scores significance against a rubric (named-lab source: +40; new artifact: +20; introduces a capability: +20; runnable code or docs available now: +20), then queries Memory Bank for similarity matches against `covered` and `human-rejected` facts. A 0.85 similarity threshold gates suppression: matches above the threshold with `metadata.type == "human-rejected"` are hard rejects; matches with `metadata.type == "covered"` are soft rejects (downscored but still eligible if nothing better surfaces). Triage either writes one `chosen_release` plus a `skip_reason` or writes `chosen_release=None` plus a reason.
 
 `route_after_triage` reads `chosen_release` and emits `SKIP` or `CONTINUE`. The `SKIP` branch ends in `record_triage_skip`, a terminal node that sets `cycle_outcome="skipped_by_triage"` and exits cleanly. The `CONTINUE` branch crosses into HITL territory.
 
@@ -241,7 +241,7 @@ This works on Cloud Run because the bridge is just a webhook receiver — its SL
 
 ### 4.3 Phase 3 — Research, Architect, Writer loop
 
-The fan-out from `approve` triggers three `LlmAgent` instances in parallel: `docs_researcher` (uses `web_fetch` to read the chosen release's official documentation), `github_researcher` (uses `github_get_repo`, `github_get_readme`, `github_list_files` if the release lives on GitHub), and `context_researcher` (uses `google_search` to surface community reactions and related releases). The split is deliberate — each researcher has a distinct tool set, an independent failure surface, and a clean input/output contract that fits a `ResearchDossier` Pydantic shape.
+The fan-out from `approve` triggers three `LlmAgent` instances in parallel: `docs_researcher` (uses `web_fetch` to read the chosen release's official documentation), `github_researcher` (uses `github_get_repo`, `github_get_readme`, `github_list_files` — the agent's prompt instructs it to no-op cleanly if the chosen release does not live on GitHub), and `context_researcher` (uses `google_search` to surface community reactions and related releases). The split is deliberate — each researcher has a distinct tool set, an independent failure surface, and a clean input/output contract that fits a `ResearchDossier` Pydantic shape.
 
 Each researcher writes its raw JSON output to a per-source state key (`docs_research`, `github_research`, `context_research`). All three converge unconditionally on `gather_research`, which is a `JoinFunctionNode` (see Pattern 3 above). It increments the call counter on each predecessor trigger and waits in `WAITING` state until the third call arrives, at which point it parses the three raw strings into `ResearchDossier` instances, merges them by section ownership (docs owns `summary`/`code_example`/`prerequisites`; github owns `repo_meta`/`readme_excerpt`; context owns `reactions`/`related_releases`), and writes the merged dossier to `state.research`.
 
@@ -434,7 +434,7 @@ The pipeline writes exactly two fact types:
 - **`covered`** — written by Publisher after a successful publication. `metadata.type="covered"`, `release_url`, `release_source`, `covered_at`, `bundle_url`, optional `starter_repo`. Encodes "we already wrote about this; don't propose it again."
 - **`human-rejected`** — written by `record_topic_verdict` on Topic Gate skip. `metadata.type="human-rejected"`, `release_url`, `release_source`, `rejected_at`. Encodes "the operator looked at this and said no."
 
-All facts live under one scope: the configurable scope key (default `gemini_agent_blueprint`). Multi-tenant is explicitly out of scope, but the scope parameter exists in the public API of `memory_bank_search` and `memory_bank_add_fact` so a future fork can swap it without a global find-and-replace.
+All facts live under one scope: the configurable scope key (default `ai_release_pipeline` — a legacy name that hasn't been renamed during the public-launch rebrand; future versions will likely track `PROJECT_APP_NAME`). Multi-tenant is explicitly out of scope, but the scope parameter exists in the public API of `memory_bank_search` and `memory_bank_add_fact` so a future fork can swap it without a global find-and-replace.
 
 Triage queries Memory Bank with the candidate title phrased as a question ("Have we encountered {title}?") and applies decision rules in order: same-URL match wins regardless of similarity score; `human-rejected` matches above 0.85 similarity drop the candidate; `covered` matches above 0.85 also drop. Failures are best-effort — `memory_bank_search` returns `[]` on any error, `memory_bank_add_fact` returns `False`, and the calling node logs and continues. Worst case: a release is re-surfaced and the operator skips it again. Better friction than a crashed cycle.
 
@@ -466,11 +466,11 @@ Full deploy steps live in [`deploy/terraform/README.md`](../deploy/terraform/REA
 
 Every cycle is observable through Vertex's built-in stack — no third-party APM is required.
 
-**Cloud Trace.** `AdkApp(..., enable_tracing=True)` is the entire setup. Agent Runtime exports OpenTelemetry spans automatically. The span hierarchy mirrors the graph: `invocation` at the top, `workflow.<name>` underneath, and per-node spans for every LlmAgent, function node, tool call, and LLM call. HITL pauses produce no spans during the suspended period; the next span appears when the workflow resumes. Trace ID prefixes are appended to Telegram messages so operators can paste them into the Trace explorer's prefix search to find the corresponding cycle.
+**Cloud Trace.** `AdkApp(..., enable_tracing=True)` is the entire setup. Agent Runtime exports OpenTelemetry spans automatically. The span hierarchy mirrors the graph: `invocation` at the top, `workflow.<name>` underneath, and per-node spans for every LlmAgent, function node, tool call, and LLM call. HITL pauses produce no spans during the suspended period; the next span appears when the workflow resumes. Cycle IDs (the 8-char session prefix from `ctx.session.id`) appear in GCS asset URLs, so operators can correlate the asset bundle URL posted to Telegram back to a session via that prefix.
 
 **Cloud Logging.** Every component logs to its native log sink: the engine to `aiplatform.googleapis.com/ReasoningEngine`, the bridge to `cloud_run_revision`, the schedulers to `cloud_scheduler_job`, Memory Bank to `aiplatform.googleapis.com/MemoryBank`. Useful filters: `jsonPayload.cycle_outcome:*` to count outcomes by type, `jsonPayload.cycle_outcome="skipped_by_triage"` for recent skips, the `severity >= ERROR` filter on the bridge for webhook failures, and a paused-too-long query that surfaces sessions over 12 hours old before the sweeper times them out.
 
-**GenAI Evaluation Service.** Per-cycle scoring hooks are referenced but kept lightweight. The publisher fires off a fire-and-forget POST to the Evaluation Service after writing the `covered` fact; results land in BigQuery via the standard sink. Scoring failure does not fail the cycle. The rubric covers topic relevance, factual accuracy, quickstart runnability, image-text coherence, and critic-editor alignment — all 0–5 scores. Operators can also run a curated regression suite manually before any major prompt change; the runner asserts `cycle_outcome`, article-mentions-title, asset count, and Memory Bank fact persistence.
+**GenAI Evaluation Service.** GenAI Evaluation Service integration is a future hook, not yet wired up. The cycle's `cycle_outcome` terminal state would be the natural attachment point for a fire-and-forget eval call, with a per-cycle rubric covering topic relevance, factual accuracy, quickstart runnability, image-text coherence, and critic-editor alignment. This is a v2.x roadmap item, not implemented in the current code. Operators can also run a curated regression suite manually before any major prompt change; the runner asserts `cycle_outcome`, article-mentions-title, asset count, and Memory Bank fact persistence.
 
 ---
 
