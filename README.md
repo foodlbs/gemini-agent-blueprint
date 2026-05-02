@@ -68,15 +68,15 @@ A few other lessons fell out of the rebuild and they're folded into the article:
 | Layer | Tech |
 |---|---|
 | Agent runtime | Google ADK 2.0b1 + Vertex AI Agent Runtime (managed, scale-to-zero) |
-| LLM | Gemini 2.0 Flash + Pro (configurable per agent) |
-| Image / Video | Imagen 3, Veo 2 |
+| LLM | Gemini 2.5 Pro + Gemini 2.5 Flash-Lite (configurable per agent) |
+| Image / Video | Imagen 4 Fast (`imagen-4.0-fast-generate-001`), Veo 3.1 Fast preview (`veo-3.1-fast-generate-preview`) |
 | HITL transport | Telegram Bot API + Cloud Run webhook bridge |
 | State | Vertex AI session storage + Firestore (bridge lookups) |
 | Memory | Vertex AI Memory Bank (managed) |
 | Storage | GCS (assets + staging tarballs) |
 | Trigger | Cloud Scheduler (hourly + 15-min HITL sweeper) |
 | Infrastructure | Terraform + a small Python deployer |
-| Tests | pytest + pytest-asyncio (~89 tests, including graph-shape regression guard) |
+| Tests | pytest + pytest-asyncio (~170 tests, including graph-shape regression guard) |
 
 ## Architecture overview
 
@@ -226,7 +226,7 @@ Edit [`agents/repo_builder.py`](agents/repo_builder.py) — this is the "produce
 ├── telegram_bridge/          # Cloud Run webhook service (separate from main agent)
 │
 ├── deploy/terraform/         # Terraform module for IAM, buckets, secrets, SAs
-├── tests/                    # pytest suite (~89 tests)
+├── tests/                    # pytest suite (~170 tests)
 │
 ├── docs/
 │   ├── ARCHITECTURE.md       # Architecture deep-dive (~6,600 words)
@@ -245,7 +245,7 @@ Edit [`agents/repo_builder.py`](agents/repo_builder.py) — this is the "produce
 uv run pytest
 ```
 
-Runs the full suite (~89 tests), including:
+Runs the full suite (~170 tests), including:
 - Per-node unit tests (each function node has a test for its routing decisions and state mutations)
 - Memory Bank facade tests (with InMemoryMemoryService backing)
 - Telegram helper tests (callback_data encoding, Firestore lookup)
