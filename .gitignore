@@ -203,4 +203,4 @@ tools/a2a-inspector/
 # Not committed because each developer/staging may deploy to their
 # own ReasoningEngine.
 deploy/.deployed_resource_id
-.claude/
+.claude
