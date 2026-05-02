@@ -1,8 +1,9 @@
 [project]
-name = "ai-release-pipeline"
-version = "2.0.0"
-description = "AI release → article pipeline on ADK 2.0 + Agent Runtime"
-readme = "DESIGN.v2.md"
+name = "gemini-agent-blueprint"
+version = "0.1.0"
+description = "Production-grade reference architecture for Gemini Agent Platform — graph workflow, HITL, Memory Bank, end-to-end on ADK 2.0 + Vertex AI Agent Runtime."
+readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.12"
 dependencies = [
     # ADK 2.0 Beta — pinned exactly per DESIGN.v2.md §10.2.

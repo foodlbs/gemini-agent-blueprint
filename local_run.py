@@ -138,9 +138,10 @@ async def main() -> int:
         root_agent.name, len(root_agent.edges), len(root_agent.graph.nodes),
     )
 
-    runner = InMemoryRunner(agent=root_agent, app_name="ai_release_pipeline_v2")
+    app_name = os.environ.get("PROJECT_APP_NAME", "gemini_agent_blueprint")
+    runner = InMemoryRunner(agent=root_agent, app_name=app_name)
     sess = await runner.session_service.create_session(
-        app_name="ai_release_pipeline_v2", user_id="local-exercise"
+        app_name=app_name, user_id="local-exercise"
     )
     log.info("Session created: %s", sess.id)
 
@@ -194,7 +195,7 @@ async def main() -> int:
 
     # Final state dump
     final = await runner.session_service.get_session(
-        app_name="ai_release_pipeline_v2",
+        app_name=app_name,
         user_id="local-exercise",
         session_id=sess.id,
     )

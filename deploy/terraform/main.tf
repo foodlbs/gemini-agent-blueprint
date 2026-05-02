@@ -35,6 +35,16 @@ provider "google" {
 # Variables
 # ---------------------------------------------------------------------------
 
+variable "project_name" {
+  description = "Resource-name prefix shared with deploy.py via TF_VAR_project_name env var. Drives SA names, secret names, bucket names. Default 'gab' = gemini-agent-blueprint."
+  type        = string
+  default     = "gab"
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{1,13}$", var.project_name))
+    error_message = "project_name must be 2-14 chars, lowercase letters/digits/hyphens, starting with a letter. Max length is bounded by GCP's 30-char Service Account account_id limit applied to the longest derived name '${var.project_name}-telegram-bridge'."
+  }
+}
+
 variable "project" {
   description = "GCP project ID (e.g. gen-lang-client-0366435980)."
   type        = string
@@ -66,11 +76,27 @@ variable "telegram_bot_token" {
 }
 
 # ---------------------------------------------------------------------------
+# Derived names — single source of truth shared by deploy.py via
+# PROJECT_PREFIX / TF_VAR_project_name. Patterns must match deploy.py.
+# ---------------------------------------------------------------------------
+
+locals {
+  sa_app          = "${var.project_name}-app"
+  sa_bridge       = "${var.project_name}-telegram-bridge"
+  sa_scheduler    = "${var.project_name}-scheduler"
+  secret_github   = "${var.project_name}-github-token"
+  secret_telegram = "${var.project_name}-telegram-bot-token"
+  secret_webhook  = "${var.project_name}-telegram-webhook-secret"
+  bucket_assets   = "${var.project}-${var.project_name}-assets"
+  bucket_staging  = "${var.project}-${var.project_name}-staging"
+}
+
+# ---------------------------------------------------------------------------
 # GCS — assets bucket (public-read, 90-day lifecycle)
 # ---------------------------------------------------------------------------
 
 resource "google_storage_bucket" "assets" {
-  name                        = "${var.project}-airel-assets-v2"
+  name                        = local.bucket_assets
   location                    = var.region
   storage_class               = "STANDARD"
   uniform_bucket_level_access = true
@@ -101,7 +127,7 @@ resource "google_storage_bucket_iam_member" "assets_public_read" {
 # ---------------------------------------------------------------------------
 
 resource "google_storage_bucket" "staging" {
-  name                        = "${var.project}-airel-v2-staging"
+  name                        = local.bucket_staging
   location                    = var.region
   storage_class               = "STANDARD"
   uniform_bucket_level_access = true
@@ -115,7 +141,7 @@ resource "google_storage_bucket" "staging" {
 # ---------------------------------------------------------------------------
 
 resource "google_secret_manager_secret" "github_token" {
-  secret_id = "airel-v2-github-token"
+  secret_id = local.secret_github
 
   replication {
     user_managed {
@@ -132,7 +158,7 @@ resource "google_secret_manager_secret_version" "github_token" {
 }
 
 resource "google_secret_manager_secret" "telegram_bot_token" {
-  secret_id = "airel-v2-telegram-bot-token"
+  secret_id = local.secret_telegram
 
   replication {
     user_managed {
@@ -156,7 +182,7 @@ resource "random_id" "webhook_secret" {
 }
 
 resource "google_secret_manager_secret" "telegram_webhook_secret" {
-  secret_id = "airel-v2-telegram-webhook-secret"
+  secret_id = local.secret_webhook
 
   replication {
     user_managed {
