@@ -1,4 +1,4 @@
-# `deploy/v2/` — Terraform module + operator runbook
+# `deploy/terraform/` — Terraform module + operator runbook
 
 Provisions everything `deploy.py` needs to land a parameterized
 ReasoningEngine (display name set via `PROJECT_DISPLAY_NAME`). Per DESIGN.v2.md §10.
@@ -117,7 +117,7 @@ schema setup needed (Firestore is schemaless).
 ## Phase 2 — `terraform apply`
 
 ```bash
-cd deploy/v2
+cd deploy/terraform
 
 # Pass secrets via env (never via -var on the command line — shell history).
 export TF_VAR_project=${GOOGLE_CLOUD_PROJECT}
@@ -173,7 +173,7 @@ docker push $IMAGE
 
 # 4. Deploy to Cloud Run.
 ENGINE_ID=$(cat deploy/.deployed_resource_id)
-BRIDGE_SA=$(cd deploy/v2 && terraform output -raw service_account_bridge)
+BRIDGE_SA=$(cd deploy/terraform && terraform output -raw service_account_bridge)
 
 gcloud run deploy "${TF_VAR_project_name}-telegram" \
   --image=$IMAGE \
@@ -198,7 +198,7 @@ echo "Bridge URL: $BRIDGE_URL"
 ## Phase 5 — Cloud Scheduler + Telegram webhook registration
 
 ```bash
-SCHEDULER_SA=$(cd deploy/v2 && terraform output -raw service_account_scheduler)
+SCHEDULER_SA=$(cd deploy/terraform && terraform output -raw service_account_scheduler)
 
 # Allow the scheduler SA to invoke the bridge Cloud Run.
 gcloud run services add-iam-policy-binding "${TF_VAR_project_name}-telegram" \
@@ -241,7 +241,7 @@ gcloud scheduler jobs create http "${TF_VAR_project_name}-hitl-sweeper" \
 gcloud scheduler jobs pause "${TF_VAR_project_name}-hitl-sweeper" --location=us-west1
 
 # Register the webhook with Telegram.
-WEBHOOK_SECRET=$(cd deploy/v2 && terraform output -raw telegram_webhook_secret_value)
+WEBHOOK_SECRET=$(cd deploy/terraform && terraform output -raw telegram_webhook_secret_value)
 TELEGRAM_BOT_TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' .env | cut -d= -f2-)
 curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
   -d "url=${BRIDGE_URL}/telegram/webhook" \
